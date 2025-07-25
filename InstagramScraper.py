@@ -432,10 +432,33 @@ def process_instagram_user(username_input):
                 }
                 all_locations.append(location_info)
 
-            media_urls = post.get("image_versions2", {}) \
+            
+            media_urls = []
+            if is_carousel:
+                carousel_media = post.get("carousel_media", [])
+                if carousel_media:
+                    first_media = carousel_media[0]
+                    if first_media.get("media_type") == 2:
+                        video_versions = first_media.get("video_versions", [])
+                        if video_versions:
+                            media_urls.append(video_versions[0].get("url"))
+                        else:
+                            media_urls.append(first_media.get("display_uri"))
+                    else:
+                        image_versions = first_media.get("image_versions2", {}).get("candidates", [])
+                        if image_versions:
+                            media_urls.append(image_versions[0].get("url"))
+                        else:
+                            media_urls.append(first_media.get("display_uri"))
+
+            else:
+                if is_video:
+                    media_urls = post.get("image_versions2", {}) \
                         .get("additional_candidates", {}) \
                         .get("igtv_first_frame", {}) \
                         .get("url")
+
+            
 
             if not like_hidden:
                 likes_list.append(likes or 0)

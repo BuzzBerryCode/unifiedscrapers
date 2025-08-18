@@ -180,6 +180,11 @@ def get_jobs(limit: int = 50) -> List[dict]:
 async def root():
     return {"message": "Scraper Dashboard API", "version": "1.0.0"}
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Railway"""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
 @app.post("/auth/login")
 async def login(request: LoginRequest):
     """Admin login endpoint."""

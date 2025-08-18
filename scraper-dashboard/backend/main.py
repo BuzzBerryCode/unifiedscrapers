@@ -241,6 +241,18 @@ async def health_check():
             "timestamp": datetime.utcnow().isoformat()
         }
 
+@app.get("/debug")
+async def debug_env():
+    """Debug endpoint to check environment variables"""
+    return {
+        "supabase_url_set": bool(os.getenv("SUPABASE_URL")),
+        "supabase_key_set": bool(os.getenv("SUPABASE_KEY")),
+        "redis_url_set": bool(os.getenv("REDIS_URL")),
+        "supabase_url_length": len(os.getenv("SUPABASE_URL", "")),
+        "supabase_key_length": len(os.getenv("SUPABASE_KEY", "")),
+        "client_creation_test": bool(get_supabase_client())
+    }
+
 @app.post("/auth/login")
 async def login(request: LoginRequest):
     """Admin login endpoint."""

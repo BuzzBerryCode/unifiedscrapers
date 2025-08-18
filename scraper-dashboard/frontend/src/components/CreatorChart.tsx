@@ -88,22 +88,28 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
         label: 'Added Creators',
         data: dailyData.map(d => d.added),
         backgroundColor: '#10B981', // Green
-        borderColor: '#059669',
-        borderWidth: 1,
+        borderColor: '#10B981',
+        borderWidth: 0,
+        borderRadius: 8,
+        borderSkipped: false,
       },
       {
-        label: 'Not Added (Filtered/Failed)',
+        label: 'Not Added',
         data: dailyData.map(d => d.notAdded),
-        backgroundColor: '#F59E0B', // Amber
-        borderColor: '#D97706',
-        borderWidth: 1,
+        backgroundColor: '#EF4444', // Red
+        borderColor: '#EF4444',
+        borderWidth: 0,
+        borderRadius: 8,
+        borderSkipped: false,
       },
       {
         label: 'Rescraped Creators',
         data: dailyData.map(d => d.rescraped),
-        backgroundColor: '#3B82F6', // Blue
-        borderColor: '#2563EB',
-        borderWidth: 1,
+        backgroundColor: '#8B5CF6', // Purple
+        borderColor: '#8B5CF6',
+        borderWidth: 0,
+        borderRadius: 8,
+        borderSkipped: false,
       }
     ]
   }
@@ -117,58 +123,102 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
         labels: {
           color: darkMode ? '#E5E7EB' : '#374151',
           font: {
-            size: 12
-          }
+            size: 13,
+            weight: '500'
+          },
+          padding: 20,
+          usePointStyle: true,
+          pointStyle: 'circle'
         }
       },
       title: {
-        display: true,
-        text: 'Daily Creator Activity (Last 7 Days)',
-        color: darkMode ? '#F9FAFB' : '#111827',
-        font: {
-          size: 16,
-          weight: 'bold'
-        }
+        display: false
       },
       tooltip: {
-        backgroundColor: darkMode ? '#374151' : '#FFFFFF',
+        backgroundColor: darkMode ? '#1F2937' : '#FFFFFF',
         titleColor: darkMode ? '#F9FAFB' : '#111827',
         bodyColor: darkMode ? '#E5E7EB' : '#374151',
-        borderColor: darkMode ? '#6B7280' : '#D1D5DB',
+        borderColor: darkMode ? '#374151' : '#E5E7EB',
         borderWidth: 1,
+        cornerRadius: 12,
+        padding: 12,
+        displayColors: true,
+        titleFont: {
+          size: 14,
+          weight: 'bold'
+        },
+        bodyFont: {
+          size: 13
+        }
       }
     },
     scales: {
       x: {
         grid: {
-          color: darkMode ? '#374151' : '#E5E7EB',
+          display: false
         },
         ticks: {
           color: darkMode ? '#9CA3AF' : '#6B7280',
+          font: {
+            size: 12,
+            weight: '500'
+          },
+          padding: 8
+        },
+        border: {
+          display: false
         }
       },
       y: {
         beginAtZero: true,
         grid: {
-          color: darkMode ? '#374151' : '#E5E7EB',
+          display: false
         },
         ticks: {
           color: darkMode ? '#9CA3AF' : '#6B7280',
           stepSize: 1,
+          font: {
+            size: 12,
+            weight: '500'
+          },
+          padding: 8
+        },
+        border: {
+          display: false
         }
       }
+    },
+    elements: {
+      bar: {
+        borderRadius: 8
+      }
+    },
+    interaction: {
+      intersect: false,
+      mode: 'index'
     }
   }
 
   return (
-    <div className={`p-6 rounded-lg shadow-sm border transition-colors ${
+    <div className={`rounded-xl shadow-lg border transition-all duration-200 ${
       darkMode 
-        ? 'bg-gray-800 border-gray-700' 
-        : 'bg-white border-gray-200'
+        ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' 
+        : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'
     }`}>
-      <div style={{ height: '300px' }}>
-        <Bar data={chartData} options={options} />
+      <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+        <h3 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          Daily Creator Activity
+        </h3>
+        <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+          Last 7 days performance overview
+        </p>
+      </div>
+      <div className="p-6">
+        <div style={{ height: '320px' }}>
+          <Bar data={chartData} options={options} />
+        </div>
       </div>
     </div>
   )
 }
+

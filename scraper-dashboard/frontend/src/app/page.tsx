@@ -21,6 +21,7 @@ import LoginForm from '@/components/LoginForm'
 import FileUpload from '@/components/FileUpload'
 import JobsTable from '@/components/JobsTable'
 import CreatorChart from '@/components/CreatorChart'
+import ModernStatsCards from '@/components/ModernStatsCards'
 import { Job, DashboardStats } from '@/types'
 
 export default function Dashboard() {
@@ -314,16 +315,21 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Modern Stats Cards */}
+        {stats && <ModernStatsCards stats={stats} darkMode={darkMode} />}
+
         {/* Creator Activity Chart */}
         <div className="mb-8">
           <CreatorChart jobs={jobs} darkMode={darkMode} />
         </div>
 
         {/* Action Buttons */}
-        <div className={`shadow rounded-lg p-6 mb-8 transition-colors ${
-          darkMode ? 'bg-gray-800' : 'bg-white'
+        <div className={`rounded-xl shadow-lg border p-6 mb-8 transition-all duration-200 ${
+          darkMode 
+            ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' 
+            : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'
         }`}>
-          <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+          <h2 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
             Quick Actions
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -356,13 +362,15 @@ export default function Dashboard() {
         </div>
 
         {/* Jobs Table */}
-        <div className={`shadow rounded-lg transition-colors ${
-          darkMode ? 'bg-gray-800' : 'bg-white'
+        <div className={`rounded-xl shadow-lg border transition-all duration-200 ${
+          darkMode 
+            ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' 
+            : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'
         }`}>
           <div className={`px-6 py-4 border-b transition-colors ${
             darkMode ? 'border-gray-700' : 'border-gray-200'
           }`}>
-            <h2 className={`text-lg font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            <h2 className={`text-lg font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
               Recent Jobs
             </h2>
           </div>

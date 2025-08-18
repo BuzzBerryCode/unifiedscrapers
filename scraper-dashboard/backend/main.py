@@ -244,13 +244,27 @@ async def health_check():
 @app.get("/debug")
 async def debug_env():
     """Debug endpoint to check environment variables"""
+    # Test Supabase client creation with error details
+    client_error = None
+    try:
+        from supabase import create_client
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_KEY")
+        test_client = create_client(url, key)
+        client_works = True
+    except Exception as e:
+        client_works = False
+        client_error = str(e)
+    
     return {
         "supabase_url_set": bool(os.getenv("SUPABASE_URL")),
         "supabase_key_set": bool(os.getenv("SUPABASE_KEY")),
         "redis_url_set": bool(os.getenv("REDIS_URL")),
         "supabase_url_length": len(os.getenv("SUPABASE_URL", "")),
         "supabase_key_length": len(os.getenv("SUPABASE_KEY", "")),
-        "client_creation_test": bool(get_supabase_client())
+        "supabase_url": os.getenv("SUPABASE_URL", "")[:50] + "..." if os.getenv("SUPABASE_URL") else "",
+        "client_creation_test": client_works,
+        "client_error": client_error
     }
 
 @app.post("/auth/login")

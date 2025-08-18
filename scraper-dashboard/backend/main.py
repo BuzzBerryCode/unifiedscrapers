@@ -418,8 +418,14 @@ async def get_dashboard_stats(current_user: str = Depends(verify_token)):
 @app.on_event("startup")
 async def startup_event():
     """Initialize the application."""
+    import os
+    port = os.getenv("PORT", "8000")
+    print("🚀 Scraper Dashboard API starting up...")
+    print(f"📊 Supabase URL: {SUPABASE_URL}")
+    print(f"🔗 Redis URL: {REDIS_URL}")
+    print(f"🌐 Port: {port}")
     init_job_table()
-    print("🚀 Scraper Dashboard API started")
+    print("✅ Scraper Dashboard API started")
 
 if __name__ == "__main__":
     import uvicorn

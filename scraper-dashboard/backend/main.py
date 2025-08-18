@@ -40,17 +40,37 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovwhgnwenxbyvpevcz.supabase.
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVub3Z3aGdud2VueGJ5dnBldmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MjEzNjU0MCwiZXhwIjoyMDY3NzEyNTQwfQ.bqXWKTR64TRARH2VOrjiQdPnQ7W-8EGJp5RIi7yFmck")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# Redis & Celery
+# Redis & Celery - Initialize lazily to avoid startup failures
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = redis.from_url(REDIS_URL)
+redis_client = None
+celery_app = None
 
-# Celery app
-celery_app = Celery(
-    "scraper_tasks",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-    include=["tasks"]
-)
+def get_redis_client():
+    global redis_client
+    if redis_client is None:
+        try:
+            redis_client = redis.from_url(REDIS_URL)
+            # Test the connection
+            redis_client.ping()
+        except Exception as e:
+            print(f"Redis connection failed: {e}")
+            redis_client = None
+    return redis_client
+
+def get_celery_app():
+    global celery_app
+    if celery_app is None:
+        try:
+            celery_app = Celery(
+                "scraper_tasks",
+                broker=REDIS_URL,
+                backend=REDIS_URL,
+                include=["tasks"]
+            )
+        except Exception as e:
+            print(f"Celery initialization failed: {e}")
+            celery_app = None
+    return celery_app
 
 # ==================== MODELS ====================
 
@@ -183,7 +203,19 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint for Railway"""
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    try:
+        # Basic health check - just return that the app is running
+        return {
+            "status": "healthy", 
+            "timestamp": datetime.utcnow().isoformat(),
+            "service": "Scraper Dashboard API"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 @app.post("/auth/login")
 async def login(request: LoginRequest):
@@ -238,10 +270,14 @@ async def upload_csv(
         
         # Store CSV data in Redis for processing
         csv_data = df.to_dict('records')
-        redis_client.setex(f"job_data:{job_id}", 3600, json.dumps(csv_data))
+        redis = get_redis_client()
+        if redis:
+            redis.setex(f"job_data:{job_id}", 3600, json.dumps(csv_data))
         
         # Queue the job
-        celery_app.send_task("tasks.process_new_creators", args=[job_id])
+        celery = get_celery_app()
+        if celery:
+            celery.send_task("tasks.process_new_creators", args=[job_id])
         
         return {
             "job_id": job_id,
@@ -288,10 +324,12 @@ async def create_rescrape_job(
         )
         
         # Queue the job
-        if request.job_type == JobType.RESCRAPE_ALL:
-            celery_app.send_task("tasks.rescrape_all_creators", args=[job_id])
-        else:
-            celery_app.send_task("tasks.rescrape_platform_creators", args=[job_id, request.platform])
+        celery = get_celery_app()
+        if celery:
+            if request.job_type == JobType.RESCRAPE_ALL:
+                celery.send_task("tasks.rescrape_all_creators", args=[job_id])
+            else:
+                celery.send_task("tasks.rescrape_platform_creators", args=[job_id, request.platform])
         
         return {
             "job_id": job_id,
@@ -336,7 +374,9 @@ async def cancel_job(
         update_job_status(job_id, JobStatus.CANCELLED)
         
         # Try to revoke the Celery task
-        celery_app.control.revoke(job_id, terminate=True)
+        celery = get_celery_app()
+        if celery:
+            celery.control.revoke(job_id, terminate=True)
         
         return {"message": "Job cancelled successfully"}
     except Exception as e:

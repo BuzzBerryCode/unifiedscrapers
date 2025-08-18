@@ -27,5 +27,5 @@ RUN chmod +x start.sh
 # Expose port
 EXPOSE 8000
 
-# Command to run the application
-CMD ["./start.sh"]
+# Command to run the application - use start script if available, fallback to direct uvicorn
+CMD ["sh", "-c", "if [ -f start.sh ]; then ./start.sh; else uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]

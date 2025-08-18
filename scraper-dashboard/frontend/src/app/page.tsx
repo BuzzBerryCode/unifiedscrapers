@@ -59,24 +59,6 @@ export default function Dashboard() {
   const [token, setToken] = useState<string | null>(null)
   const [darkMode, setDarkMode] = useState(true) // Default to dark mode
 
-  useEffect(() => {
-    // Check if user is already logged in
-    const savedToken = localStorage.getItem('token')
-    if (savedToken) {
-      setToken(savedToken)
-      setIsAuthenticated(true)
-      fetchData()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      // Fetch data every 10 seconds for real-time updates (reduced for performance)
-      const interval = setInterval(fetchData, 10000)
-      return () => clearInterval(interval)
-    }
-  }, [isAuthenticated, fetchData])
-
   const fetchData = useCallback(async () => {
     if (!token) return
 
@@ -104,6 +86,24 @@ export default function Dashboard() {
       console.error('Error fetching data:', error)
     }
   }, [token])
+
+  useEffect(() => {
+    // Check if user is already logged in
+    const savedToken = localStorage.getItem('token')
+    if (savedToken) {
+      setToken(savedToken)
+      setIsAuthenticated(true)
+      fetchData()
+    }
+  }, [fetchData])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Fetch data every 10 seconds for real-time updates (reduced for performance)
+      const interval = setInterval(fetchData, 10000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuthenticated, fetchData])
 
   const handleLogin = async (username: string, password: string) => {
     setLoading(true)

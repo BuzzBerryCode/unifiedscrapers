@@ -35,10 +35,20 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this")
 ALGORITHM = "HS256"
 
-# Supabase
+# Supabase - Initialize lazily to avoid startup failures
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovwhgnwenxbyvpevcz.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVub3Z3aGdud2VueGJ5dnBldmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MjEzNjU0MCwiZXhwIjoyMDY3NzEyNTQwfQ.bqXWKTR64TRARH2VOrjiQdPnQ7W-8EGJp5RIi7yFmck")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = None
+
+def get_supabase_client():
+    global supabase
+    if supabase is None:
+        try:
+            supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        except Exception as e:
+            print(f"Supabase connection failed: {e}")
+            supabase = None
+    return supabase
 
 # Redis & Celery - Initialize lazily to avoid startup failures
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -145,7 +155,9 @@ def init_job_table():
     """Initialize the jobs table in Supabase if it doesn't exist."""
     try:
         # Create jobs table
-        supabase.table("scraper_jobs").select("id").limit(1).execute()
+        client = get_supabase_client()
+        if client:
+            client.table("scraper_jobs").select("id").limit(1).execute()
     except:
         # Table doesn't exist, we'll create it via SQL
         print("Jobs table needs to be created in Supabase")
@@ -166,7 +178,9 @@ def create_job(job_type: str, description: str = "", total_items: int = 0) -> st
     }
     
     try:
-        supabase.table("scraper_jobs").insert(job_data).execute()
+        client = get_supabase_client()
+        if client:
+            client.table("scraper_jobs").insert(job_data).execute()
         return job_id
     except Exception as e:
         print(f"Error creating job: {e}")

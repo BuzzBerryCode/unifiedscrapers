@@ -250,7 +250,7 @@ export default function Dashboard() {
           <div className="bg-gray-800 shadow-lg rounded-lg p-8 border border-gray-700">
             <div className="text-center mb-8">
               <div className="flex items-center justify-center mb-4">
-                <Image src="/logo.svg" alt="Logo" width={48} height={48} />
+                <Image src="/logo.png" alt="Logo" width={48} height={48} className="rounded-xl" />
               </div>
               <h1 className="text-3xl font-bold text-white mb-2">
                 Scraper Dashboard
@@ -278,7 +278,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <Image src="/logo.svg" alt="Logo" width={32} height={32} />
+              <Image src="/logo.png" alt="Logo" width={32} height={32} className="rounded-lg" />
               <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 Scraper Dashboard
               </h1>

@@ -85,7 +85,16 @@ def main():
     
     # Try to start server
     try:
-        port = int(os.getenv("PORT", 8000))
+        port_str = os.getenv("PORT", "8000")
+        print(f"🌐 PORT environment variable: '{port_str}'")
+        
+        try:
+            port = int(port_str)
+            print(f"🌐 Parsed port: {port}")
+        except ValueError as e:
+            print(f"❌ Invalid port value: {port_str}, using default 8000")
+            port = 8000
+        
         print(f"🌐 Starting server on port {port}...")
         
         import uvicorn
@@ -93,7 +102,7 @@ def main():
             app,
             host="0.0.0.0",
             port=port,
-            log_level="debug"
+            log_level="info"
         )
         
     except Exception as e:

@@ -1,0 +1,331 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { toast, Toaster } from 'react-hot-toast'
+import { 
+  CloudArrowUpIcon, 
+  PlayIcon, 
+  PauseIcon,
+  TrashIcon,
+  ChartBarIcon,
+  UsersIcon,
+  ClockIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+  ExclamationTriangleIcon
+} from '@heroicons/react/24/outline'
+import LoginForm from '@/components/LoginForm'
+import FileUpload from '@/components/FileUpload'
+import JobsTable from '@/components/JobsTable'
+import StatsCards from '@/components/StatsCards'
+import { Job, DashboardStats } from '@/types'
+
+export default function Dashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Check if user is already logged in
+    const savedToken = localStorage.getItem('token')
+    if (savedToken) {
+      setToken(savedToken)
+      setIsAuthenticated(true)
+      fetchData()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Fetch data every 5 seconds for real-time updates
+      const interval = setInterval(fetchData, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [isAuthenticated])
+
+  const fetchData = async () => {
+    if (!token) return
+
+    try {
+      // Fetch jobs and stats in parallel
+      const [jobsResponse, statsResponse] = await Promise.all([
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs`, {
+          headers: { Authorization: `Bearer ${token}` }
+        }),
+        fetch(`${process.env.NEXT_PUBLIC_API_URL}/stats`, {
+          headers: { Authorization: `Bearer ${token}` }
+        })
+      ])
+
+      if (jobsResponse.ok) {
+        const jobsData = await jobsResponse.json()
+        setJobs(jobsData)
+      }
+
+      if (statsResponse.ok) {
+        const statsData = await statsResponse.json()
+        setStats(statsData)
+      }
+    } catch (error) {
+      console.error('Error fetching data:', error)
+    }
+  }
+
+  const handleLogin = async (username: string, password: string) => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setToken(data.access_token)
+        localStorage.setItem('token', data.access_token)
+        setIsAuthenticated(true)
+        toast.success('Successfully logged in!')
+        fetchData()
+      } else {
+        toast.error('Invalid credentials')
+      }
+    } catch (error) {
+      toast.error('Login failed. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    setToken(null)
+    setIsAuthenticated(false)
+    setJobs([])
+    setStats(null)
+    toast.success('Logged out successfully')
+  }
+
+  const handleFileUpload = async (file: File) => {
+    if (!token) return
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/upload-csv`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(`Job created! Processing ${data.creators_count} creators`)
+        fetchData() // Refresh jobs list
+      } else {
+        const error = await response.json()
+        toast.error(error.detail || 'Upload failed')
+      }
+    } catch (error) {
+      toast.error('Upload failed. Please try again.')
+    }
+  }
+
+  const handleRescrapeAll = async () => {
+    if (!token) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/rescrape`, {
+        method: 'POST',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ job_type: 'rescrape_all' })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(`Rescrape job created! Processing ${data.total_items} creators`)
+        fetchData()
+      } else {
+        const error = await response.json()
+        toast.error(error.detail || 'Failed to create rescrape job')
+      }
+    } catch (error) {
+      toast.error('Failed to create rescrape job')
+    }
+  }
+
+  const handleRescrapeInstagram = async () => {
+    if (!token) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/rescrape`, {
+        method: 'POST',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          job_type: 'rescrape_platform',
+          platform: 'instagram'
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(`Instagram rescrape job created! Processing ${data.total_items} creators`)
+        fetchData()
+      } else {
+        const error = await response.json()
+        toast.error(error.detail || 'Failed to create Instagram rescrape job')
+      }
+    } catch (error) {
+      toast.error('Failed to create Instagram rescrape job')
+    }
+  }
+
+  const handleRescrapeTikTok = async () => {
+    if (!token) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/rescrape`, {
+        method: 'POST',
+        headers: { 
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          job_type: 'rescrape_platform',
+          platform: 'tiktok'
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        toast.success(`TikTok rescrape job created! Processing ${data.total_items} creators`)
+        fetchData()
+      } else {
+        const error = await response.json()
+        toast.error(error.detail || 'Failed to create TikTok rescrape job')
+      }
+    } catch (error) {
+      toast.error('Failed to create TikTok rescrape job')
+    }
+  }
+
+  const handleCancelJob = async (jobId: string) => {
+    if (!token) return
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        toast.success('Job cancelled successfully')
+        fetchData()
+      } else {
+        toast.error('Failed to cancel job')
+      }
+    } catch (error) {
+      toast.error('Failed to cancel job')
+    }
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="max-w-md w-full">
+          <div className="bg-white shadow-lg rounded-lg p-8">
+            <div className="text-center mb-8">
+              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+                🚀 Scraper Dashboard
+              </h1>
+              <p className="text-gray-600">
+                Admin access required
+              </p>
+            </div>
+            <LoginForm onLogin={handleLogin} loading={loading} />
+          </div>
+        </div>
+        <Toaster position="top-right" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Toaster position="top-right" />
+      
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center">
+              <h1 className="text-2xl font-bold text-gray-900">
+                🚀 Scraper Dashboard
+              </h1>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Stats Cards */}
+        {stats && <StatsCards stats={stats} />}
+
+        {/* Action Buttons */}
+        <div className="bg-white shadow rounded-lg p-6 mb-8">
+          <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <FileUpload onFileUpload={handleFileUpload} />
+            
+            <button
+              onClick={handleRescrapeAll}
+              className="flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            >
+              <PlayIcon className="w-5 h-5 mr-2" />
+              Rescrape All
+            </button>
+            
+            <button
+              onClick={handleRescrapeInstagram}
+              className="flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500"
+            >
+              <PlayIcon className="w-5 h-5 mr-2" />
+              Rescrape Instagram
+            </button>
+            
+            <button
+              onClick={handleRescrapeTikTok}
+              className="flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500"
+            >
+              <PlayIcon className="w-5 h-5 mr-2" />
+              Rescrape TikTok
+            </button>
+          </div>
+        </div>
+
+        {/* Jobs Table */}
+        <div className="bg-white shadow rounded-lg">
+          <div className="px-6 py-4 border-b border-gray-200">
+            <h2 className="text-lg font-medium text-gray-900">Recent Jobs</h2>
+          </div>
+          <JobsTable jobs={jobs} onCancelJob={handleCancelJob} />
+        </div>
+      </main>
+    </div>
+  )
+}

@@ -1,0 +1,381 @@
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import os
+import pandas as pd
+import io
+from datetime import datetime, timedelta
+import uuid
+import asyncio
+from typing import List, Optional
+import redis
+import json
+from celery import Celery
+from supabase import create_client, Client
+import jwt
+from passlib.context import CryptContext
+
+# ==================== CONFIGURATION ====================
+
+app = FastAPI(title="Scraper Dashboard API", version="1.0.0")
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "https://*.vercel.app"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Authentication
+security = HTTPBearer()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-change-this")
+ALGORITHM = "HS256"
+
+# Supabase
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovwhgnwenxbyvpevcz.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVub3Z3aGdud2VueGJ5dnBldmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MjEzNjU0MCwiZXhwIjoyMDY3NzEyNTQwfQ.bqXWKTR64TRARH2VOrjiQdPnQ7W-8EGJp5RIi7yFmck")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Redis & Celery
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = redis.from_url(REDIS_URL)
+
+# Celery app
+celery_app = Celery(
+    "scraper_tasks",
+    broker=REDIS_URL,
+    backend=REDIS_URL,
+    include=["tasks"]
+)
+
+# ==================== MODELS ====================
+
+from pydantic import BaseModel
+from enum import Enum
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class JobType(str, Enum):
+    NEW_CREATORS = "new_creators"
+    RESCRAPE_ALL = "rescrape_all"
+    RESCRAPE_PLATFORM = "rescrape_platform"
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class JobRequest(BaseModel):
+    job_type: JobType
+    platform: Optional[str] = None
+    description: Optional[str] = None
+
+class JobResponse(BaseModel):
+    id: str
+    job_type: str
+    status: str
+    created_at: str
+    updated_at: str
+    description: str
+    total_items: Optional[int] = None
+    processed_items: Optional[int] = None
+    failed_items: Optional[int] = None
+    results: Optional[dict] = None
+    error_message: Optional[str] = None
+
+# ==================== AUTHENTICATION ====================
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(hours=24)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+# ==================== DATABASE FUNCTIONS ====================
+
+def init_job_table():
+    """Initialize the jobs table in Supabase if it doesn't exist."""
+    try:
+        # Create jobs table
+        supabase.table("scraper_jobs").select("id").limit(1).execute()
+    except:
+        # Table doesn't exist, we'll create it via SQL
+        print("Jobs table needs to be created in Supabase")
+
+def create_job(job_type: str, description: str = "", total_items: int = 0) -> str:
+    """Create a new job in the database."""
+    job_id = str(uuid.uuid4())
+    job_data = {
+        "id": job_id,
+        "job_type": job_type,
+        "status": JobStatus.PENDING,
+        "description": description,
+        "total_items": total_items,
+        "processed_items": 0,
+        "failed_items": 0,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    
+    try:
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        return job_id
+    except Exception as e:
+        print(f"Error creating job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create job")
+
+def update_job_status(job_id: str, status: str, **kwargs):
+    """Update job status and other fields."""
+    update_data = {
+        "status": status,
+        "updated_at": datetime.utcnow().isoformat(),
+        **kwargs
+    }
+    
+    try:
+        supabase.table("scraper_jobs").update(update_data).eq("id", job_id).execute()
+    except Exception as e:
+        print(f"Error updating job {job_id}: {e}")
+
+def get_jobs(limit: int = 50) -> List[dict]:
+    """Get recent jobs from the database."""
+    try:
+        response = supabase.table("scraper_jobs").select("*").order("created_at", desc=True).limit(limit).execute()
+        return response.data
+    except Exception as e:
+        print(f"Error fetching jobs: {e}")
+        return []
+
+# ==================== API ENDPOINTS ====================
+
+@app.get("/")
+async def root():
+    return {"message": "Scraper Dashboard API", "version": "1.0.0"}
+
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    """Admin login endpoint."""
+    # Simple hardcoded admin for now - in production, use proper user management
+    ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "scraper123")
+    
+    if request.username != ADMIN_USERNAME or request.password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    access_token = create_access_token(data={"sub": request.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/jobs/upload-csv")
+async def upload_csv(
+    file: UploadFile = File(...),
+    current_user: str = Depends(verify_token)
+):
+    """Upload CSV file and create new creators job."""
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Only CSV files are allowed")
+    
+    try:
+        # Read and parse CSV
+        contents = await file.read()
+        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        
+        # Validate CSV structure
+        required_columns = ['Usernames', 'Platform']
+        if not all(col in df.columns for col in required_columns):
+            raise HTTPException(
+                status_code=400, 
+                detail=f"CSV must contain columns: {required_columns}"
+            )
+        
+        # Clean and validate data
+        df = df.dropna(subset=required_columns)
+        df['Platform'] = df['Platform'].str.lower()
+        valid_platforms = ['instagram', 'tiktok']
+        df = df[df['Platform'].isin(valid_platforms)]
+        
+        if len(df) == 0:
+            raise HTTPException(status_code=400, detail="No valid creators found in CSV")
+        
+        # Create job
+        job_id = create_job(
+            job_type=JobType.NEW_CREATORS,
+            description=f"Process {len(df)} creators from {file.filename}",
+            total_items=len(df)
+        )
+        
+        # Store CSV data in Redis for processing
+        csv_data = df.to_dict('records')
+        redis_client.setex(f"job_data:{job_id}", 3600, json.dumps(csv_data))
+        
+        # Queue the job
+        celery_app.send_task("tasks.process_new_creators", args=[job_id])
+        
+        return {
+            "job_id": job_id,
+            "message": f"Successfully queued job for {len(df)} creators",
+            "creators_count": len(df)
+        }
+        
+    except pd.errors.EmptyDataError:
+        raise HTTPException(status_code=400, detail="CSV file is empty")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing CSV: {str(e)}")
+
+@app.post("/jobs/rescrape")
+async def create_rescrape_job(
+    request: JobRequest,
+    current_user: str = Depends(verify_token)
+):
+    """Create a rescraping job."""
+    try:
+        # Get creator count for the job
+        if request.job_type == JobType.RESCRAPE_ALL:
+            # Count all creators
+            response = supabase.table("creatordata").select("id", count="exact").execute()
+            total_items = response.count
+            description = f"Rescrape all {total_items} creators"
+            
+        elif request.job_type == JobType.RESCRAPE_PLATFORM:
+            if not request.platform:
+                raise HTTPException(status_code=400, detail="Platform is required for platform rescraping")
+            
+            # Count creators for specific platform
+            response = supabase.table("creatordata").select("id", count="exact").eq("platform", request.platform.title()).execute()
+            total_items = response.count
+            description = f"Rescrape all {total_items} {request.platform.title()} creators"
+        
+        else:
+            raise HTTPException(status_code=400, detail="Invalid job type")
+        
+        # Create job
+        job_id = create_job(
+            job_type=request.job_type,
+            description=description,
+            total_items=total_items
+        )
+        
+        # Queue the job
+        if request.job_type == JobType.RESCRAPE_ALL:
+            celery_app.send_task("tasks.rescrape_all_creators", args=[job_id])
+        else:
+            celery_app.send_task("tasks.rescrape_platform_creators", args=[job_id, request.platform])
+        
+        return {
+            "job_id": job_id,
+            "message": f"Successfully queued {request.job_type} job",
+            "total_items": total_items
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating job: {str(e)}")
+
+@app.get("/jobs", response_model=List[JobResponse])
+async def get_job_list(
+    limit: int = 50,
+    current_user: str = Depends(verify_token)
+):
+    """Get list of jobs."""
+    jobs = get_jobs(limit)
+    return jobs
+
+@app.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job_details(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Get details of a specific job."""
+    try:
+        response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching job: {str(e)}")
+
+@app.delete("/jobs/{job_id}")
+async def cancel_job(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Cancel a job."""
+    try:
+        # Update job status to cancelled
+        update_job_status(job_id, JobStatus.CANCELLED)
+        
+        # Try to revoke the Celery task
+        celery_app.control.revoke(job_id, terminate=True)
+        
+        return {"message": "Job cancelled successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
+
+@app.get("/stats")
+async def get_dashboard_stats(current_user: str = Depends(verify_token)):
+    """Get dashboard statistics."""
+    try:
+        # Get total creators
+        creators_response = supabase.table("creatordata").select("id", count="exact").execute()
+        total_creators = creators_response.count
+        
+        # Get creators by platform
+        instagram_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "Instagram").execute()
+        tiktok_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "TikTok").execute()
+        
+        # Get recent jobs
+        recent_jobs = get_jobs(10)
+        
+        # Get job status counts
+        job_stats = {}
+        for status in JobStatus:
+            jobs_response = supabase.table("scraper_jobs").select("id", count="exact").eq("status", status).execute()
+            job_stats[status] = jobs_response.count
+        
+        return {
+            "total_creators": total_creators,
+            "instagram_creators": instagram_response.count,
+            "tiktok_creators": tiktok_response.count,
+            "recent_jobs": recent_jobs,
+            "job_stats": job_stats
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching stats: {str(e)}")
+
+# ==================== STARTUP ====================
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the application."""
+    init_job_table()
+    print("🚀 Scraper Dashboard API started")
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

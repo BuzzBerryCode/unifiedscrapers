@@ -28,4 +28,4 @@ RUN chmod +x start.sh
 EXPOSE 8000
 
 # Command to run the application
-CMD ["python", "minimal_main.py"]
+CMD ["python", "entrypoint.py"]

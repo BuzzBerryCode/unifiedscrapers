@@ -195,14 +195,19 @@ def update_job_status(job_id: str, status: str, **kwargs):
     }
     
     try:
-        supabase.table("scraper_jobs").update(update_data).eq("id", job_id).execute()
+        client = get_supabase_client()
+        if client:
+            client.table("scraper_jobs").update(update_data).eq("id", job_id).execute()
     except Exception as e:
         print(f"Error updating job {job_id}: {e}")
 
 def get_jobs(limit: int = 50) -> List[dict]:
     """Get recent jobs from the database."""
     try:
-        response = supabase.table("scraper_jobs").select("*").order("created_at", desc=True).limit(limit).execute()
+        client = get_supabase_client()
+        if not client:
+            return []
+        response = client.table("scraper_jobs").select("*").order("created_at", desc=True).limit(limit).execute()
         return response.data
     except Exception as e:
         print(f"Error fetching jobs: {e}")
@@ -314,7 +319,10 @@ async def create_rescrape_job(
         # Get creator count for the job
         if request.job_type == JobType.RESCRAPE_ALL:
             # Count all creators
-            response = supabase.table("creatordata").select("id", count="exact").execute()
+            client = get_supabase_client()
+            if not client:
+                return {"job_id": job_id, "message": "Database connection failed", "creators_count": 0}
+            response = client.table("creatordata").select("id", count="exact").execute()
             total_items = response.count
             description = f"Rescrape all {total_items} creators"
             
@@ -323,7 +331,10 @@ async def create_rescrape_job(
                 raise HTTPException(status_code=400, detail="Platform is required for platform rescraping")
             
             # Count creators for specific platform
-            response = supabase.table("creatordata").select("id", count="exact").eq("platform", request.platform.title()).execute()
+            client = get_supabase_client()
+            if not client:
+                return {"job_id": job_id, "message": "Database connection failed", "creators_count": 0}
+            response = client.table("creatordata").select("id", count="exact").eq("platform", request.platform.title()).execute()
             total_items = response.count
             description = f"Rescrape all {total_items} {request.platform.title()} creators"
         
@@ -370,7 +381,10 @@ async def get_job_details(
 ):
     """Get details of a specific job."""
     try:
-        response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
         if not response.data:
             raise HTTPException(status_code=404, detail="Job not found")
         return response.data[0]
@@ -401,12 +415,16 @@ async def get_dashboard_stats(current_user: str = Depends(verify_token)):
     """Get dashboard statistics."""
     try:
         # Get total creators
-        creators_response = supabase.table("creatordata").select("id", count="exact").execute()
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+            
+        creators_response = client.table("creatordata").select("id", count="exact").execute()
         total_creators = creators_response.count
         
         # Get creators by platform
-        instagram_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "Instagram").execute()
-        tiktok_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "TikTok").execute()
+        instagram_response = client.table("creatordata").select("id", count="exact").eq("platform", "Instagram").execute()
+        tiktok_response = client.table("creatordata").select("id", count="exact").eq("platform", "TikTok").execute()
         
         # Get recent jobs
         recent_jobs = get_jobs(10)
@@ -414,7 +432,7 @@ async def get_dashboard_stats(current_user: str = Depends(verify_token)):
         # Get job status counts
         job_stats = {}
         for status in JobStatus:
-            jobs_response = supabase.table("scraper_jobs").select("id", count="exact").eq("status", status).execute()
+            jobs_response = client.table("scraper_jobs").select("id", count="exact").eq("status", status).execute()
             job_stats[status] = jobs_response.count
         
         return {

@@ -250,7 +250,13 @@ export default function Dashboard() {
           <div className="bg-gray-800 shadow-lg rounded-lg p-8 border border-gray-700">
             <div className="text-center mb-8">
               <div className="flex items-center justify-center mb-4">
-                <Image src="/logo.png" alt="Logo" width={48} height={48} className="rounded-xl" />
+                <Image 
+                  src="/Buzzberry.png" 
+                  alt="BuzzBerry Logo" 
+                  width={48} 
+                  height={48} 
+                  className="rounded-xl"
+                />
               </div>
               <h1 className="text-3xl font-bold text-white mb-2">
                 Scraper Dashboard
@@ -278,7 +284,13 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <Image src="/logo.png" alt="Logo" width={32} height={32} className="rounded-lg" />
+              <Image 
+                src="/Buzzberry.png" 
+                alt="BuzzBerry Logo" 
+                width={32} 
+                height={32} 
+                className="rounded-lg"
+              />
               <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 Scraper Dashboard
               </h1>
@@ -315,19 +327,11 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Modern Stats Cards */}
-        {stats && <ModernStatsCards stats={stats} darkMode={darkMode} />}
-
-        {/* Creator Activity Chart */}
-        <div className="mb-8">
-          <CreatorChart jobs={jobs} darkMode={darkMode} />
-        </div>
-
-        {/* Action Buttons */}
-        <div className={`rounded-xl shadow-lg border p-6 mb-8 transition-all duration-200 ${
+        {/* Quick Actions - Moved to top */}
+        <div className={`rounded-xl shadow-sm border p-6 mb-6 transition-all duration-200 ${
           darkMode 
-            ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' 
-            : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-white border-gray-200'
         }`}>
           <h2 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
             Quick Actions
@@ -361,11 +365,11 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Jobs Table */}
-        <div className={`rounded-xl shadow-lg border transition-all duration-200 ${
+        {/* Recent Jobs - Moved up */}
+        <div className={`rounded-xl shadow-sm border mb-8 transition-all duration-200 ${
           darkMode 
-            ? 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700' 
-            : 'bg-gradient-to-br from-white to-gray-50 border-gray-200'
+            ? 'bg-gray-800 border-gray-700' 
+            : 'bg-white border-gray-200'
         }`}>
           <div className={`px-6 py-4 border-b transition-colors ${
             darkMode ? 'border-gray-700' : 'border-gray-200'
@@ -375,6 +379,14 @@ export default function Dashboard() {
             </h2>
           </div>
           <JobsTable jobs={jobs} onCancelJob={handleCancelJob} darkMode={darkMode} />
+        </div>
+
+        {/* Modern Stats Cards */}
+        {stats && <ModernStatsCards stats={stats} darkMode={darkMode} />}
+
+        {/* Creator Activity Chart */}
+        <div className="mb-8">
+          <CreatorChart jobs={jobs} darkMode={darkMode} />
         </div>
       </main>
     </div>

@@ -58,13 +58,23 @@ export default function ModernStatsCards({ stats, darkMode = false }: ModernStat
     subtitle?: string
   }) => {
     const colorClasses = {
-      blue: 'from-blue-500 to-blue-600',
-      green: 'from-green-500 to-green-600',
-      purple: 'from-purple-500 to-purple-600',
-      yellow: 'from-yellow-500 to-yellow-600',
-      red: 'from-red-500 to-red-600',
-      indigo: 'from-indigo-500 to-indigo-600',
-      pink: 'from-pink-500 to-pink-600'
+      blue: darkMode ? 'from-blue-500/20 to-blue-600/20' : 'from-blue-50 to-blue-100',
+      green: darkMode ? 'from-green-500/20 to-green-600/20' : 'from-green-50 to-green-100',
+      purple: darkMode ? 'from-purple-500/20 to-purple-600/20' : 'from-purple-50 to-purple-100',
+      yellow: darkMode ? 'from-yellow-500/20 to-yellow-600/20' : 'from-yellow-50 to-yellow-100',
+      red: darkMode ? 'from-red-500/20 to-red-600/20' : 'from-red-50 to-red-100',
+      indigo: darkMode ? 'from-indigo-500/20 to-indigo-600/20' : 'from-indigo-50 to-indigo-100',
+      pink: darkMode ? 'from-pink-500/20 to-pink-600/20' : 'from-pink-50 to-pink-100'
+    }
+
+    const iconColorClasses = {
+      blue: darkMode ? 'text-blue-400' : 'text-blue-600',
+      green: darkMode ? 'text-green-400' : 'text-green-600',
+      purple: darkMode ? 'text-purple-400' : 'text-purple-600',
+      yellow: darkMode ? 'text-yellow-400' : 'text-yellow-600',
+      red: darkMode ? 'text-red-400' : 'text-red-600',
+      indigo: darkMode ? 'text-indigo-400' : 'text-indigo-600',
+      pink: darkMode ? 'text-pink-400' : 'text-pink-600'
     }
 
     return (
@@ -93,8 +103,10 @@ export default function ModernStatsCards({ stats, darkMode = false }: ModernStat
               </p>
             )}
           </div>
-          <div className={`p-3 rounded-full bg-gradient-to-r ${colorClasses[color]} shadow-lg`}>
-            <Icon className="h-6 w-6 text-white" />
+          <div className={`p-3 rounded-full bg-gradient-to-r ${colorClasses[color]} ${
+            darkMode ? 'shadow-md' : 'shadow-sm'
+          }`}>
+            <Icon className={`h-6 w-6 ${iconColorClasses[color]}`} />
           </div>
         </div>
         

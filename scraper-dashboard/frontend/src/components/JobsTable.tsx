@@ -93,13 +93,15 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
     return `${hours}h ${minutes % 60}m`
   }
 
-  const getSuccessFailureCounts = (job: Job) => {
-    if (!job.results) return { success: 0, failure: 0 }
+  const getAddedSkippedCounts = (job: Job) => {
+    if (!job.results) return { added: 0, skipped: 0, failed: 0, filtered: 0 }
     
-    const success = (job.results.added?.length || 0) + (job.results.updated?.length || 0)
-    const failure = (job.results.failed?.length || 0) + (job.results.skipped?.length || 0)
+    const added = (job.results.added?.length || 0) + (job.results.updated?.length || 0)
+    const skipped = job.results.skipped?.length || 0
+    const failed = job.results.failed?.length || 0
+    const filtered = job.results.filtered?.length || 0
     
-    return { success, failure }
+    return { added, skipped, failed, filtered }
   }
 
   const handleViewDetails = (job: Job) => {
@@ -131,7 +133,7 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
               <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
                 darkMode ? 'text-gray-300' : 'text-gray-500'
               }`}>
-                Success/Failed
+                Added/Skipped
               </th>
               <th className={`px-6 py-3 text-left text-xs font-medium uppercase tracking-wider ${
                 darkMode ? 'text-gray-300' : 'text-gray-500'
@@ -149,7 +151,7 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
             darkMode ? 'bg-gray-800 divide-gray-700' : 'bg-white divide-gray-200'
           }`}>
             {jobs.map((job) => {
-              const { success, failure } = getSuccessFailureCounts(job)
+              const { added, skipped, failed, filtered } = getAddedSkippedCounts(job)
               const estimatedTime = getEstimatedTimeRemaining(job)
               
               return (
@@ -215,15 +217,25 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
                       <div className="flex items-center">
                         <CheckCircleIcon className="h-4 w-4 text-green-500 mr-1" />
                         <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                          {success}
+                          {added}
                         </span>
                       </div>
                       <div className="flex items-center">
-                        <XCircleIcon className="h-4 w-4 text-red-500 mr-1" />
+                        <div className="h-4 w-4 rounded-full bg-blue-500 mr-1 flex items-center justify-center">
+                          <div className="h-2 w-2 rounded-full bg-white"></div>
+                        </div>
                         <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
-                          {failure}
+                          {skipped}
                         </span>
                       </div>
+                      {(failed > 0 || filtered > 0) && (
+                        <div className="flex items-center">
+                          <XCircleIcon className="h-4 w-4 text-red-500 mr-1" />
+                          <span className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            {failed + filtered}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td className={`px-6 py-4 whitespace-nowrap text-sm ${
@@ -303,34 +315,34 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Status</label>
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Status</label>
                   <span className={getStatusBadge(selectedJob.status)}>
                     {selectedJob.status}
                   </span>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Progress</label>
-                  <p className="text-sm text-gray-900">
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Progress</label>
+                  <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>
                     {selectedJob.processed_items || 0} / {selectedJob.total_items || 0} ({getProgressPercentage(selectedJob)}%)
                   </p>
                 </div>
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-gray-700">Description</label>
-                <p className="text-sm text-gray-900">{selectedJob.description}</p>
+                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Description</label>
+                <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{selectedJob.description}</p>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Created</label>
-                  <p className="text-sm text-gray-900">
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Created</label>
+                  <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>
                     {format(new Date(selectedJob.created_at), 'MMM dd, yyyy HH:mm:ss')}
                   </p>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Updated</label>
-                  <p className="text-sm text-gray-900">
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Updated</label>
+                  <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>
                     {format(new Date(selectedJob.updated_at), 'MMM dd, yyyy HH:mm:ss')}
                   </p>
                 </div>
@@ -338,8 +350,12 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
 
               {selectedJob.error_message && (
                 <div>
-                  <label className="block text-sm font-medium text-red-700">Error Message</label>
-                  <p className="text-sm text-red-600 bg-red-50 p-2 rounded">
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-red-400' : 'text-red-700'}`}>Error Message</label>
+                  <p className={`text-sm p-2 rounded ${
+                    darkMode 
+                      ? 'text-red-300 bg-red-900/20 border border-red-800' 
+                      : 'text-red-600 bg-red-50'
+                  }`}>
                     {selectedJob.error_message}
                   </p>
                 </div>
@@ -347,12 +363,18 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
 
               {selectedJob.results && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Results</label>
-                  <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>Results</label>
+                  <div className={`p-4 rounded-lg space-y-3 ${
+                    darkMode ? 'bg-gray-700 border border-gray-600' : 'bg-gray-50'
+                  }`}>
                     {selectedJob.results.added && selectedJob.results.added.length > 0 && (
                       <div>
-                        <span className="text-sm font-medium text-green-700">Added ({selectedJob.results.added.length}):</span>
-                        <div className="text-xs text-gray-600 max-h-20 overflow-y-auto">
+                        <span className={`text-sm font-medium ${darkMode ? 'text-green-400' : 'text-green-700'}`}>
+                          ✅ Added ({selectedJob.results.added.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
                           {selectedJob.results.added.join(', ')}
                         </div>
                       </div>
@@ -360,36 +382,65 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
                     
                     {selectedJob.results.updated && selectedJob.results.updated.length > 0 && (
                       <div>
-                        <span className="text-sm font-medium text-blue-700">Updated ({selectedJob.results.updated.length}):</span>
-                        <div className="text-xs text-gray-600 max-h-20 overflow-y-auto">
+                        <span className={`text-sm font-medium ${darkMode ? 'text-blue-400' : 'text-blue-700'}`}>
+                          🔄 Updated ({selectedJob.results.updated.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
                           {selectedJob.results.updated.join(', ')}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {selectedJob.results.deleted && selectedJob.results.deleted.length > 0 && (
-                      <div>
-                        <span className="text-sm font-medium text-yellow-700">Deleted ({selectedJob.results.deleted.length}):</span>
-                        <div className="text-xs text-gray-600 max-h-20 overflow-y-auto">
-                          {selectedJob.results.deleted.join(', ')}
-                        </div>
-                      </div>
-                    )}
-                    
-                    {selectedJob.results.failed && selectedJob.results.failed.length > 0 && (
-                      <div>
-                        <span className="text-sm font-medium text-red-700">Failed ({selectedJob.results.failed.length}):</span>
-                        <div className="text-xs text-gray-600 max-h-20 overflow-y-auto">
-                          {selectedJob.results.failed.join(', ')}
                         </div>
                       </div>
                     )}
                     
                     {selectedJob.results.skipped && selectedJob.results.skipped.length > 0 && (
                       <div>
-                        <span className="text-sm font-medium text-gray-700">Skipped ({selectedJob.results.skipped.length}):</span>
-                        <div className="text-xs text-gray-600 max-h-20 overflow-y-auto">
+                        <span className={`text-sm font-medium ${darkMode ? 'text-blue-400' : 'text-blue-700'}`}>
+                          ⏭️ Skipped - Already Exists ({selectedJob.results.skipped.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
                           {selectedJob.results.skipped.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedJob.results.filtered && selectedJob.results.filtered.length > 0 && (
+                      <div>
+                        <span className={`text-sm font-medium ${darkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
+                          🔍 Filtered - Didn't Meet Criteria ({selectedJob.results.filtered.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
+                          {selectedJob.results.filtered.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedJob.results.failed && selectedJob.results.failed.length > 0 && (
+                      <div>
+                        <span className={`text-sm font-medium ${darkMode ? 'text-red-400' : 'text-red-700'}`}>
+                          ❌ Failed - API/Processing Errors ({selectedJob.results.failed.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
+                          {selectedJob.results.failed.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {selectedJob.results.deleted && selectedJob.results.deleted.length > 0 && (
+                      <div>
+                        <span className={`text-sm font-medium ${darkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
+                          🗑️ Deleted - Inactive ({selectedJob.results.deleted.length}):
+                        </span>
+                        <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
+                          darkMode ? 'text-gray-300' : 'text-gray-600'
+                        }`}>
+                          {selectedJob.results.deleted.join(', ')}
                         </div>
                       </div>
                     )}

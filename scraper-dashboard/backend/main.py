@@ -264,8 +264,21 @@ async def debug_env():
         "supabase_key_length": len(os.getenv("SUPABASE_KEY", "")),
         "supabase_url": os.getenv("SUPABASE_URL", "")[:50] + "..." if os.getenv("SUPABASE_URL") else "",
         "client_creation_test": client_works,
-        "client_error": client_error
+        "client_error": client_error,
+        "celery_connected": bool(get_celery_app()),
+        "redis_ping": test_redis_connection()
     }
+
+def test_redis_connection():
+    """Test Redis connection"""
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            redis_client.ping()
+            return True
+        return False
+    except Exception as e:
+        return f"Redis error: {str(e)}"
 
 @app.post("/auth/login")
 async def login(request: LoginRequest):
@@ -440,6 +453,43 @@ async def cancel_job(
         return {"message": "Job cancelled successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
+
+@app.post("/jobs/{job_id}/trigger")
+async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Manually trigger a pending job for testing."""
+    try:
+        # Get the job details
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+            
+        job_response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+            
+        job = job_response.data[0]
+        if job["status"] != "pending":
+            raise HTTPException(status_code=400, detail=f"Job is not pending (current status: {job['status']})")
+        
+        # Try to trigger the job manually
+        celery = get_celery_app()
+        if not celery:
+            raise HTTPException(status_code=500, detail="Celery not available")
+            
+        # Import and call the task directly
+        from tasks import process_new_creators_task, process_rescrape_task
+        
+        if job["job_type"] == "new_creators":
+            result = process_new_creators_task.delay(job_id, job["results"])
+        elif job["job_type"] == "rescrape_all":
+            result = process_rescrape_task.delay(job_id)
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown job type: {job['job_type']}")
+            
+        return {"message": f"Job {job_id} triggered manually", "task_id": result.id}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error triggering job: {str(e)}")
 
 @app.get("/stats")
 async def get_dashboard_stats(current_user: str = Depends(verify_token)):

@@ -241,18 +241,18 @@ export default function Dashboard() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="max-w-md w-full">
-          <div className="bg-white shadow-lg rounded-lg p-8">
+          <div className="bg-gray-800 shadow-lg rounded-lg p-8 border border-gray-700">
             <div className="text-center mb-8">
-              <h1 className="text-3xl font-bold text-gray-900 mb-2">
+              <h1 className="text-3xl font-bold text-white mb-2">
                 🚀 Scraper Dashboard
               </h1>
-              <p className="text-gray-600">
+              <p className="text-gray-300">
                 Admin access required
               </p>
             </div>
-            <LoginForm onLogin={handleLogin} loading={loading} />
+            <LoginForm onLogin={handleLogin} loading={loading} darkMode={true} />
           </div>
         </div>
         <Toaster position="top-right" />

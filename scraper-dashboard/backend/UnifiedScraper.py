@@ -438,7 +438,7 @@ def process_instagram_user(username_input):
 
     if response.status_code != 200:
         print(f"❌ Failed to fetch profile data: {response.status_code}")
-        return None
+        return {"error": "api_error", "message": f"API error: {response.status_code}"}
 
     try:
         data = response.json()["data"]["user"]
@@ -448,11 +448,11 @@ def process_instagram_user(username_input):
         followers = data.get("edge_followed_by", {}).get("count", 0)
     except Exception as e:
         print("❌ Error parsing ScrapeCreators profile data:", str(e))
-        return None
+        return {"error": "api_error", "message": f"Data parsing error: {str(e)}"}
 
     if followers < 10_000 or followers > 350_000:
         print(f"🚫 Skipping: Follower count {followers} not in 10k–350k range.")
-        return None
+        return {"error": "filtered", "message": f"Follower count {followers:,} not in 10k-350k range"}
     
     # --- START: Multi-Niche Classification Logic ---
     primary_niche = None
@@ -465,7 +465,7 @@ def process_instagram_user(username_input):
 
     if not primary_niche:
         print(f"🚫 Skipping @{username_input}: Not a Crypto, Trading, or Finance influencer.")
-        return None
+        return {"error": "filtered", "message": "Not a Crypto, Trading, or Finance influencer"}
     print(f"✅ Primary Niche Identified: {primary_niche}")
     # --- END: Multi-Niche Classification Logic ---
 

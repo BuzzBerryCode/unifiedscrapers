@@ -12,6 +12,7 @@ export interface Job {
     deleted?: string[]
     failed?: string[]
     skipped?: string[]
+    filtered?: string[]
   }
   error_message?: string
   created_at: string

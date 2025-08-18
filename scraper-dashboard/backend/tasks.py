@@ -98,7 +98,7 @@ def process_new_creators(self, job_id: str):
         total_items = len(csv_data)
         processed_items = 0
         failed_items = 0
-        results = {"added": [], "failed": [], "skipped": []}
+        results = {"added": [], "failed": [], "skipped": [], "filtered": []}
         
         print(f"Processing {total_items} creators")
         
@@ -119,10 +119,20 @@ def process_new_creators(self, job_id: str):
                 # Process based on platform
                 if platform == 'instagram':
                     result = process_instagram_user(username)
-                    if result and isinstance(result, dict) and 'creator_id' in result:
-                        # Process media asynchronously
-                        asyncio.run(process_creator_media(result['creator_id'], username, result['data']))
-                        results["added"].append(f"@{username} (Instagram)")
+                    if result and isinstance(result, dict):
+                        if 'error' in result:
+                            # Handle different error types
+                            if result['error'] == 'filtered':
+                                results["filtered"].append(f"@{username} - {result['message']}")
+                            else:
+                                results["failed"].append(f"@{username} - {result['message']}")
+                                failed_items += 1
+                        elif 'creator_id' in result:
+                            # Process media asynchronously
+                            asyncio.run(process_creator_media(result['creator_id'], username, result['data']))
+                            results["added"].append(f"@{username} (Instagram)")
+                        else:
+                            results["added"].append(f"@{username} (Instagram)")
                     elif result:
                         results["added"].append(f"@{username} (Instagram)")
                     else:

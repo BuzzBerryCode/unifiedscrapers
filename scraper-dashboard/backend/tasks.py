@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import asyncio
+import time
 from datetime import datetime
 from celery import Celery
 import redis
@@ -261,32 +262,51 @@ def rescrape_all_creators(self, job_id: str):
         raise
 
 @celery_app.task(bind=True)
-def rescrape_platform_creators(self, job_id: str, platform: str):
-    """Rescrape creators for a specific platform."""
+def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_index: int = 0):
+    """Rescrape creators for a specific platform with resume functionality."""
     try:
         print(f"Starting job {job_id}: rescrape_platform_creators ({platform})")
+        if resume_from_index > 0:
+            print(f"🔄 RESUMING from index {resume_from_index}")
+        
         update_job_status(job_id, "running")
         
         # Get creators for the platform
         target_niches = ['Trading', 'Crypto', 'Finance']
         response = supabase.table("creatordata").select("*").in_('primary_niche', target_niches).eq('platform', platform.title()).execute()
-        creators = response.data
+        all_creators = response.data
         
-        total_items = len(creators)
-        processed_items = 0
+        # Resume from specific index if provided
+        creators = all_creators[resume_from_index:] if resume_from_index > 0 else all_creators
+        
+        total_items = len(all_creators)  # Total for progress tracking
+        processed_items = resume_from_index  # Start from resume point
         failed_items = 0
         results = {"updated": [], "deleted": [], "failed": []}
         
-        print(f"Rescraping {total_items} {platform} creators")
+        print(f"Rescraping {len(creators)} {platform} creators (starting from {resume_from_index + 1}/{total_items})")
         
         for i, creator in enumerate(creators):
             try:
                 handle = creator.get('handle')
+                current_index = resume_from_index + i
                 
-                print(f"Rescraping {i+1}/{total_items}: @{handle} ({platform})")
+                print(f"Rescraping {current_index + 1}/{total_items}: @{handle} ({platform})")
                 
-                # Rescrape the creator
-                result = asyncio.run(rescrape_and_update_creator(creator))
+                # Add timeout protection to individual creator processing
+                start_time = time.time()
+                try:
+                    # Use asyncio.wait_for to add timeout protection
+                    result = asyncio.run(
+                        asyncio.wait_for(
+                            rescrape_and_update_creator(creator), 
+                            timeout=300  # 5 minute timeout per creator
+                        )
+                    )
+                except asyncio.TimeoutError:
+                    processing_time = time.time() - start_time
+                    print(f"⏰ TIMEOUT: @{handle} processing exceeded 5 minutes ({processing_time:.2f}s)")
+                    result = {'status': 'error', 'error': f'Processing timeout after {processing_time:.2f}s'}
                 
                 if result['status'] == 'success':
                     results["updated"].append(f"@{handle}")
@@ -298,13 +318,13 @@ def rescrape_platform_creators(self, job_id: str, platform: str):
                 
                 processed_items += 1
                 
-                # Update progress every 10 items
-                if i % 10 == 0:
+                # Update progress every 5 items (more frequent updates)
+                if i % 5 == 0:
                     update_job_progress(job_id, processed_items, failed_items)
                 
             except Exception as e:
-                print(f"Error rescraping @{creator.get('handle', 'unknown')}: {e}")
-                results["failed"].append(f"@{creator.get('handle', 'unknown')} - {str(e)}")
+                print(f"❌ Critical error rescraping @{creator.get('handle', 'unknown')}: {e}")
+                results["failed"].append(f"@{creator.get('handle', 'unknown')} - Critical error: {str(e)}")
                 failed_items += 1
                 processed_items += 1
         

@@ -18,7 +18,48 @@ import aiohttp
 from concurrent.futures import ThreadPoolExecutor
 import ssl
 import traceback
+import signal
+from functools import wraps
 import sys
+
+# ==================== TIMEOUT PROTECTION ====================
+
+class TimeoutError(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutError("Operation timed out")
+
+def with_timeout(seconds):
+    """Decorator to add timeout protection to functions."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Set the signal handler and a timeout alarm
+            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(seconds)
+            
+            try:
+                result = func(*args, **kwargs)
+            except TimeoutError:
+                print(f"⏰ Function {func.__name__} timed out after {seconds} seconds")
+                return None
+            finally:
+                # Disable the alarm and restore the old handler
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+            
+            return result
+        return wrapper
+    return decorator
+
+async def with_timeout_async(coro, timeout_seconds):
+    """Add timeout protection to async functions."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_seconds)
+    except asyncio.TimeoutError:
+        print(f"⏰ Async operation timed out after {timeout_seconds} seconds")
+        return None
 
 # ==================== CONFIGURATION ====================
 
@@ -239,32 +280,38 @@ def calculate_buzz_score(new_data, existing_data):
 
 # ==================== MEDIA PROCESSING FUNCTIONS ====================
 
+@with_timeout(30)  # 30 second timeout for downloads
 def download_file(url: str) -> bytes:
     """Download file from URL and return its content as bytes."""
     try:
+        print(f"⬇️ Downloading: {url[:50]}...")
         response = requests.get(url, timeout=15)
         response.raise_for_status()
+        print(f"✅ Downloaded {len(response.content)} bytes")
         return response.content
     except requests.RequestException as e:
-        print(f"Error downloading {url}: {e}")
+        print(f"❌ Error downloading {url}: {e}")
         return None
 
+@with_timeout(20)  # 20 second timeout for uploads
 def upload_to_supabase_storage(bucket: str, path: str, file_content: bytes, content_type: str = None) -> str:
     """Upload file to Supabase storage and return public URL."""
     try:
+        print(f"⬆️ Uploading to: {path}")
         res = supabase.storage.from_(bucket).upload(
             path=path,
             file=file_content,
             file_options={"content-type": content_type, "upsert": "true"}
         )
         url = supabase.storage.from_(bucket).get_public_url(path)
+        print(f"✅ Upload successful: {path}")
         return url
     except Exception as e:
-        print(f"Upload failed for {path}, attempting to get existing URL. Error: {e}")
+        print(f"❌ Upload failed for {path}, attempting to get existing URL. Error: {e}")
         try:
             return supabase.storage.from_(bucket).get_public_url(path)
         except Exception as e2:
-            print(f"Could not get public URL for {path}. Error: {e2}")
+            print(f"❌ Could not get public URL for {path}. Error: {e2}")
             return None
 
 def get_file_extension_and_type(url: str) -> tuple:
@@ -465,9 +512,15 @@ def scrape_instagram_user_data(username):
     # Profile Data
     profile_url = f"https://api.scrapecreators.com/v1/instagram/profile?handle={username}"
     headers = {"x-api-key": SCRAPECREATORS_API_KEY}
-    profile_response = requests.get(profile_url, headers=headers)
-    if profile_response.status_code != 200:
-        print(f"❌ Failed to fetch Instagram profile data for @{username}: {profile_response.text}")
+    
+    print(f"📡 Fetching profile data from API...")
+    try:
+        profile_response = requests.get(profile_url, headers=headers, timeout=30)
+        if profile_response.status_code != 200:
+            print(f"❌ Failed to fetch Instagram profile data for @{username}: {profile_response.text}")
+            return None
+    except requests.RequestException as e:
+        print(f"❌ API request failed for @{username}: {e}")
         return None
     
     profile_data = profile_response.json().get("data", {}).get("user", {})
@@ -487,8 +540,14 @@ def scrape_instagram_user_data(username):
 
     # Posts Data - only fetch if follower count is in range
     posts_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username}"
-    posts_response = requests.get(posts_url, headers=headers)
-    posts_data = posts_response.json().get("items", []) if posts_response.status_code == 200 else []
+    
+    print(f"📡 Fetching posts data from API...")
+    try:
+        posts_response = requests.get(posts_url, headers=headers, timeout=30)
+        posts_data = posts_response.json().get("items", []) if posts_response.status_code == 200 else []
+    except requests.RequestException as e:
+        print(f"❌ Posts API request failed for @{username}: {e}")
+        posts_data = []
 
     print(f"✅ Fetched Instagram profile and {len(posts_data)} posts for @{username}.")
 
@@ -762,6 +821,8 @@ async def rescrape_and_update_creator(creator):
     
     print(f"\n{'='*20} RESCRAPING @{handle} ({platform}) {'='*20}")
     
+    # Add timeout protection to the entire creator processing
+    start_time = time.time()
     try:
         # Route to appropriate scraper based on platform
         if platform.lower() == 'instagram':
@@ -855,10 +916,13 @@ async def rescrape_and_update_creator(creator):
         supabase.table("creatordata").update(update_payload).eq("handle", handle).execute()
         print(f"✅ Successfully updated @{handle}.")
         
+        processing_time = time.time() - start_time
+        print(f"⏱️ Processed @{handle} in {processing_time:.2f} seconds")
         return {'handle': handle, 'status': 'success', 'data': new_data}
         
     except Exception as e:
-        print(f"❌ Error processing @{handle}: {e}")
+        processing_time = time.time() - start_time
+        print(f"❌ Error processing @{handle} after {processing_time:.2f} seconds: {e}")
         traceback.print_exc()
         return {'handle': handle, 'status': 'error', 'error': str(e)}
 

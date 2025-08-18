@@ -454,6 +454,56 @@ async def cancel_job(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
 
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Resume a cancelled or failed job from where it left off."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get the job details
+        job_response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        
+        # Check if job can be resumed
+        if job["status"] not in ["cancelled", "failed"]:
+            raise HTTPException(status_code=400, detail=f"Job cannot be resumed (current status: {job['status']})")
+        
+        # Get resume point from processed_items
+        resume_from_index = job.get("processed_items", 0)
+        
+        # Update job status to running
+        client.table("scraper_jobs").update({"status": "running"}).eq("id", job_id).execute()
+        
+        # Queue the job with resume index
+        celery = get_celery_app()
+        if celery:
+            if job["job_type"] == "rescrape_platform":
+                # Extract platform from description or job data
+                platform = "Instagram"  # Default, should be extracted from job data
+                if "TikTok" in job.get("description", ""):
+                    platform = "TikTok"
+                
+                celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform, resume_from_index])
+            else:
+                raise HTTPException(status_code=400, detail="Resume not supported for this job type yet")
+        
+        return {
+            "message": f"Job {job_id} resumed from index {resume_from_index}",
+            "resume_from_index": resume_from_index,
+            "total_items": job.get("total_items", 0)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resuming job: {str(e)}")
+
 @app.post("/jobs/{job_id}/trigger")
 async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):
     """Manually trigger a pending job for testing."""

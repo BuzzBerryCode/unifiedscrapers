@@ -1,10 +1,11 @@
 'use client'
 
+import React from 'react'
 import { 
   UsersIcon, 
   ChartBarIcon,
   MapPinIcon,
-  TrendingUpIcon,
+  PlayIcon,
   CurrencyDollarIcon,
   BuildingOfficeIcon,
   GlobeAltIcon
@@ -52,7 +53,7 @@ export default function ModernStatsCards({ stats, darkMode = false }: ModernStat
   }: {
     title: string
     value: string | number
-    icon: any
+    icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
     color?: 'blue' | 'green' | 'purple' | 'yellow' | 'red' | 'indigo' | 'pink'
     subtitle?: string
   }) => {
@@ -130,7 +131,7 @@ export default function ModernStatsCards({ stats, darkMode = false }: ModernStat
           <StatCard
             title="TikTok"
             value={stats.tiktok_creators}
-            icon={TrendingUpIcon}
+            icon={PlayIcon}
             color="pink"
             subtitle={`${Math.round((stats.tiktok_creators / stats.total_creators) * 100)}% of total`}
           />

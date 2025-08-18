@@ -251,7 +251,7 @@ export default function Dashboard() {
             <div className="text-center mb-8">
               <div className="flex items-center justify-center mb-4">
                 <Image 
-                  src="/Buzzberry.png" 
+                  src="/Buzzberry profile picture rounded corners-256x256.png" 
                   alt="BuzzBerry Logo" 
                   width={48} 
                   height={48} 
@@ -285,7 +285,7 @@ export default function Dashboard() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
               <Image 
-                src="/Buzzberry.png" 
+                src="/Buzzberry profile picture rounded corners-256x256.png" 
                 alt="BuzzBerry Logo" 
                 width={32} 
                 height={32} 

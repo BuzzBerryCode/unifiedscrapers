@@ -124,7 +124,7 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
           color: darkMode ? '#E5E7EB' : '#374151',
           font: {
             size: 13,
-            weight: '500'
+            weight: 'bold'
           },
           padding: 20,
           usePointStyle: true,
@@ -161,7 +161,7 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
           color: darkMode ? '#9CA3AF' : '#6B7280',
           font: {
             size: 12,
-            weight: '500'
+            weight: 'normal'
           },
           padding: 8
         },
@@ -179,7 +179,7 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
           stepSize: 1,
           font: {
             size: 12,
-            weight: '500'
+            weight: 'normal'
           },
           padding: 8
         },

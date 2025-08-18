@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import Image from 'next/image'
+import dynamic from 'next/dynamic'
 import { toast, Toaster } from 'react-hot-toast'
 import { 
   CloudArrowUpIcon, 
@@ -20,8 +21,34 @@ import {
 import LoginForm from '@/components/LoginForm'
 import FileUpload from '@/components/FileUpload'
 import JobsTable from '@/components/JobsTable'
-import CreatorChart from '@/components/CreatorChart'
-import ModernStatsCards from '@/components/ModernStatsCards'
+
+// Dynamic imports for heavy components to improve initial load
+const CreatorChart = dynamic(() => import('@/components/CreatorChart'), {
+  loading: () => (
+    <div className="rounded-xl shadow-lg border p-6 animate-pulse bg-gray-100 dark:bg-gray-800">
+      <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded mb-4 w-1/3"></div>
+      <div className="h-80 bg-gray-200 dark:bg-gray-700 rounded"></div>
+    </div>
+  ),
+  ssr: false
+})
+
+const ModernStatsCards = dynamic(() => import('@/components/ModernStatsCards'), {
+  loading: () => (
+    <div className="space-y-6 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {[1, 2, 3].map(i => (
+          <div key={i} className="rounded-xl p-6 animate-pulse bg-gray-100 dark:bg-gray-800">
+            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded mb-2 w-1/2"></div>
+            <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded mb-2 w-1/3"></div>
+            <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-2/3"></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  ),
+  ssr: false
+})
 import { Job, DashboardStats } from '@/types'
 
 export default function Dashboard() {
@@ -44,13 +71,13 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      // Fetch data every 5 seconds for real-time updates
-      const interval = setInterval(fetchData, 5000)
+      // Fetch data every 10 seconds for real-time updates (reduced for performance)
+      const interval = setInterval(fetchData, 10000)
       return () => clearInterval(interval)
     }
-  }, [isAuthenticated])
+  }, [isAuthenticated, fetchData])
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!token) return
 
     try {
@@ -76,7 +103,7 @@ export default function Dashboard() {
     } catch (error) {
       console.error('Error fetching data:', error)
     }
-  }
+  }, [token])
 
   const handleLogin = async (username: string, password: string) => {
     setLoading(true)
@@ -104,14 +131,18 @@ export default function Dashboard() {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('token')
     setToken(null)
     setIsAuthenticated(false)
     setJobs([])
     setStats(null)
     toast.success('Logged out successfully')
-  }
+  }, [])
+
+  // Memoize expensive computations
+  const memoizedJobs = useMemo(() => jobs, [jobs])
+  const memoizedStats = useMemo(() => stats, [stats])
 
   const handleFileUpload = async (file: File) => {
     if (!token) return
@@ -378,16 +409,16 @@ export default function Dashboard() {
               Recent Jobs
             </h2>
           </div>
-          <JobsTable jobs={jobs} onCancelJob={handleCancelJob} darkMode={darkMode} />
+          <JobsTable jobs={memoizedJobs} onCancelJob={handleCancelJob} darkMode={darkMode} />
+        </div>
+
+        {/* Creator Activity Chart - Moved under Recent Jobs */}
+        <div className="mb-8">
+          <CreatorChart jobs={memoizedJobs} darkMode={darkMode} />
         </div>
 
         {/* Modern Stats Cards */}
-        {stats && <ModernStatsCards stats={stats} darkMode={darkMode} />}
-
-        {/* Creator Activity Chart */}
-        <div className="mb-8">
-          <CreatorChart jobs={jobs} darkMode={darkMode} />
-        </div>
+        {memoizedStats && <ModernStatsCards stats={memoizedStats} darkMode={darkMode} />}
       </main>
     </div>
   )

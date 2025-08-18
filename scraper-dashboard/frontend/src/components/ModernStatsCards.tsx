@@ -109,11 +109,6 @@ export default function ModernStatsCards({ stats, darkMode = false }: ModernStat
             <Icon className={`h-6 w-6 ${iconColorClasses[color]}`} />
           </div>
         </div>
-        
-        {/* Subtle background pattern */}
-        <div className="absolute top-0 right-0 -mt-4 -mr-4 opacity-10">
-          <Icon className="h-20 w-20 text-gray-400" />
-        </div>
       </div>
     )
   }

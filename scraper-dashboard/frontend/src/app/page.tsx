@@ -12,12 +12,14 @@ import {
   ClockIcon,
   CheckCircleIcon,
   XCircleIcon,
-  ExclamationTriangleIcon
+  ExclamationTriangleIcon,
+  SunIcon,
+  MoonIcon
 } from '@heroicons/react/24/outline'
 import LoginForm from '@/components/LoginForm'
 import FileUpload from '@/components/FileUpload'
 import JobsTable from '@/components/JobsTable'
-import StatsCards from '@/components/StatsCards'
+import CreatorChart from '@/components/CreatorChart'
 import { Job, DashboardStats } from '@/types'
 
 export default function Dashboard() {
@@ -245,8 +247,11 @@ export default function Dashboard() {
         <div className="max-w-md w-full">
           <div className="bg-gray-800 shadow-lg rounded-lg p-8 border border-gray-700">
             <div className="text-center mb-8">
+              <div className="flex items-center justify-center mb-4">
+                <img src="/logo.svg" alt="Logo" className="w-12 h-12" />
+              </div>
               <h1 className="text-3xl font-bold text-white mb-2">
-                🚀 Scraper Dashboard
+                Scraper Dashboard
               </h1>
               <p className="text-gray-300">
                 Admin access required
@@ -270,9 +275,10 @@ export default function Dashboard() {
       }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center">
+            <div className="flex items-center space-x-3">
+              <img src="/logo.svg" alt="Logo" className="w-8 h-8" />
               <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                🚀 Scraper Dashboard
+                Scraper Dashboard
               </h1>
             </div>
             <div className="flex items-center space-x-4">
@@ -285,7 +291,11 @@ export default function Dashboard() {
                 }`}
                 title="Toggle dark mode"
               >
-                {darkMode ? '☀️' : '🌙'}
+                {darkMode ? (
+                  <SunIcon className="h-5 w-5" />
+                ) : (
+                  <MoonIcon className="h-5 w-5" />
+                )}
               </button>
               <button
                 onClick={handleLogout}
@@ -303,8 +313,10 @@ export default function Dashboard() {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        {stats && <StatsCards stats={stats} darkMode={darkMode} />}
+        {/* Creator Activity Chart */}
+        <div className="mb-8">
+          <CreatorChart jobs={jobs} darkMode={darkMode} />
+        </div>
 
         {/* Action Buttons */}
         <div className={`shadow rounded-lg p-6 mb-8 transition-colors ${

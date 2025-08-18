@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import { toast, Toaster } from 'react-hot-toast'
 import { 
   CloudArrowUpIcon, 
@@ -95,7 +96,7 @@ export default function Dashboard() {
       } else {
         toast.error('Invalid credentials')
       }
-    } catch (error) {
+    } catch {
       toast.error('Login failed. Please try again.')
     } finally {
       setLoading(false)
@@ -132,7 +133,7 @@ export default function Dashboard() {
         const error = await response.json()
         toast.error(error.detail || 'Upload failed')
       }
-    } catch (error) {
+    } catch {
       toast.error('Upload failed. Please try again.')
     }
   }
@@ -158,7 +159,7 @@ export default function Dashboard() {
         const error = await response.json()
         toast.error(error.detail || 'Failed to create rescrape job')
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to create rescrape job')
     }
   }
@@ -187,7 +188,7 @@ export default function Dashboard() {
         const error = await response.json()
         toast.error(error.detail || 'Failed to create Instagram rescrape job')
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to create Instagram rescrape job')
     }
   }
@@ -216,7 +217,7 @@ export default function Dashboard() {
         const error = await response.json()
         toast.error(error.detail || 'Failed to create TikTok rescrape job')
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to create TikTok rescrape job')
     }
   }
@@ -236,7 +237,7 @@ export default function Dashboard() {
       } else {
         toast.error('Failed to cancel job')
       }
-    } catch (error) {
+    } catch {
       toast.error('Failed to cancel job')
     }
   }
@@ -248,7 +249,7 @@ export default function Dashboard() {
           <div className="bg-gray-800 shadow-lg rounded-lg p-8 border border-gray-700">
             <div className="text-center mb-8">
               <div className="flex items-center justify-center mb-4">
-                <img src="/logo.svg" alt="Logo" className="w-12 h-12" />
+                <Image src="/logo.svg" alt="Logo" width={48} height={48} />
               </div>
               <h1 className="text-3xl font-bold text-white mb-2">
                 Scraper Dashboard
@@ -276,7 +277,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <img src="/logo.svg" alt="Logo" className="w-8 h-8" />
+              <Image src="/logo.svg" alt="Logo" width={32} height={32} />
               <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 Scraper Dashboard
               </h1>

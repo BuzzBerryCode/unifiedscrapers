@@ -409,7 +409,7 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
                     {selectedJob.results.filtered && selectedJob.results.filtered.length > 0 && (
                       <div>
                         <span className={`text-sm font-medium ${darkMode ? 'text-yellow-400' : 'text-yellow-700'}`}>
-                          🔍 Filtered - Didn't Meet Criteria ({selectedJob.results.filtered.length}):
+                          🔍 Filtered - Didn&apos;t Meet Criteria ({selectedJob.results.filtered.length}):
                         </span>
                         <div className={`text-xs mt-1 max-h-20 overflow-y-auto ${
                           darkMode ? 'text-gray-300' : 'text-gray-600'

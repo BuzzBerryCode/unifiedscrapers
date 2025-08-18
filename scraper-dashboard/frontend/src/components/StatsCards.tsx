@@ -5,8 +5,7 @@ import {
   ChartBarIcon,
   ClockIcon,
   CheckCircleIcon,
-  XCircleIcon,
-  ExclamationTriangleIcon
+  XCircleIcon
 } from '@heroicons/react/24/outline'
 import { DashboardStats } from '@/types'
 

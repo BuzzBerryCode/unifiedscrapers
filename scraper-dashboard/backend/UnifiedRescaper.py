@@ -161,7 +161,8 @@ def calculate_change(new_value, old_value):
         elif change < -1000:
             change = -1000
         
-        change = int(change * 100)
+        # Store as percentage (not multiplied by 100)
+        change = round(change, 2)
             
     except (ValueError, TypeError, ZeroDivisionError):
         return 0, 'zero'
@@ -883,7 +884,7 @@ async def rescrape_and_update_creator(creator):
         print(f"      Avg Views: {creator.get('average_views')} → {new_data.get('average_views')}")
         print(f"      Avg Likes: {old_avg_likes} → {new_likes_value}")
         print(f"      Avg Comments: {creator.get('average_comments')} → {new_data.get('average_comments')}")
-        print(f"      Calculated changes: Followers: {followers_change/100:.2f}%, ER: {er_change/100:.2f}%, Views: {views_change/100:.2f}%, Likes: {likes_change/100:.2f}%, Comments: {comments_change/100:.2f}%")
+        print(f"      Calculated changes: Followers: {followers_change:.2f}%, ER: {er_change:.2f}%, Views: {views_change:.2f}%, Likes: {likes_change:.2f}%, Comments: {comments_change:.2f}%")
 
         # Prepare update payload
         update_payload = {
@@ -901,11 +902,11 @@ async def rescrape_and_update_creator(creator):
         }
         
         print(f"   🔍 Final update payload verification:")
-        print(f"      followers_change: {update_payload.get('followers_change')/100:.2f}% (stored as {update_payload.get('followers_change')})")
-        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change')/100:.2f}% (stored as {update_payload.get('engagement_rate_change')})")
-        print(f"      average_views_change: {update_payload.get('average_views_change')/100:.2f}% (stored as {update_payload.get('average_views_change')})")
-        print(f"      average_likes_change: {update_payload.get('average_likes_change')/100:.2f}% (stored as {update_payload.get('average_likes_change')})")
-        print(f"      average_comments_change: {update_payload.get('average_comments_change')/100:.2f}% (stored as {update_payload.get('average_comments_change')})")
+        print(f"      followers_change: {update_payload.get('followers_change'):.2f}% (stored as {update_payload.get('followers_change')})")
+        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change'):.2f}% (stored as {update_payload.get('engagement_rate_change')})")
+        print(f"      average_views_change: {update_payload.get('average_views_change'):.2f}% (stored as {update_payload.get('average_views_change')})")
+        print(f"      average_likes_change: {update_payload.get('average_likes_change'):.2f}% (stored as {update_payload.get('average_likes_change')})")
+        print(f"      average_comments_change: {update_payload.get('average_comments_change'):.2f}% (stored as {update_payload.get('average_comments_change')})")
 
         # Process media files
         print(f"   ⬇️ Downloading media for @{handle}...")

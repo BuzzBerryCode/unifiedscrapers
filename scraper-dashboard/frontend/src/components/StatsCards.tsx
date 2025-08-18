@@ -12,9 +12,10 @@ import { DashboardStats } from '@/types'
 
 interface StatsCardsProps {
   stats: DashboardStats
+  darkMode?: boolean
 }
 
-export default function StatsCards({ stats }: StatsCardsProps) {
+export default function StatsCards({ stats, darkMode = false }: StatsCardsProps) {
   const cards = [
     {
       title: 'Total Creators',
@@ -63,7 +64,9 @@ export default function StatsCards({ stats }: StatsCardsProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6 mb-8">
       {cards.map((card, index) => (
-        <div key={index} className="bg-white overflow-hidden shadow rounded-lg">
+        <div key={index} className={`overflow-hidden shadow rounded-lg transition-colors ${
+          darkMode ? 'bg-gray-800' : 'bg-white'
+        }`}>
           <div className="p-5">
             <div className="flex items-center">
               <div className="flex-shrink-0">
@@ -73,17 +76,23 @@ export default function StatsCards({ stats }: StatsCardsProps) {
               </div>
               <div className="ml-5 w-0 flex-1">
                 <dl>
-                  <dt className="text-sm font-medium text-gray-500 truncate">
+                  <dt className={`text-sm font-medium truncate ${
+                    darkMode ? 'text-gray-400' : 'text-gray-500'
+                  }`}>
                     {card.title}
                   </dt>
-                  <dd className="text-lg font-medium text-gray-900">
+                  <dd className={`text-lg font-medium ${
+                    darkMode ? 'text-white' : 'text-gray-900'
+                  }`}>
                     {card.value}
                   </dd>
                 </dl>
               </div>
             </div>
             <div className="mt-3">
-              <p className="text-xs text-gray-500">
+              <p className={`text-xs ${
+                darkMode ? 'text-gray-400' : 'text-gray-500'
+              }`}>
                 {card.description}
               </p>
             </div>

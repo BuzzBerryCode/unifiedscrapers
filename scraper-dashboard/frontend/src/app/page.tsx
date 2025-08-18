@@ -26,6 +26,7 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [token, setToken] = useState<string | null>(null)
+  const [darkMode, setDarkMode] = useState(true) // Default to dark mode
 
   useEffect(() => {
     // Check if user is already logged in
@@ -260,35 +261,58 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className={`min-h-screen transition-colors ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
       <Toaster position="top-right" />
       
       {/* Header */}
-      <header className="bg-white shadow-sm border-b">
+      <header className={`shadow-sm border-b transition-colors ${
+        darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+      }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                 🚀 Scraper Dashboard
               </h1>
             </div>
-            <button
-              onClick={handleLogout}
-              className="text-gray-500 hover:text-gray-700 px-3 py-2 rounded-md text-sm font-medium"
-            >
-              Logout
-            </button>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className={`p-2 rounded-lg transition-colors ${
+                  darkMode 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                }`}
+                title="Toggle dark mode"
+              >
+                {darkMode ? '☀️' : '🌙'}
+              </button>
+              <button
+                onClick={handleLogout}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  darkMode 
+                    ? 'text-gray-300 hover:text-white' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        {stats && <StatsCards stats={stats} />}
+        {stats && <StatsCards stats={stats} darkMode={darkMode} />}
 
         {/* Action Buttons */}
-        <div className="bg-white shadow rounded-lg p-6 mb-8">
-          <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Actions</h2>
+        <div className={`shadow rounded-lg p-6 mb-8 transition-colors ${
+          darkMode ? 'bg-gray-800' : 'bg-white'
+        }`}>
+          <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+            Quick Actions
+          </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <FileUpload onFileUpload={handleFileUpload} />
             
@@ -319,11 +343,17 @@ export default function Dashboard() {
         </div>
 
         {/* Jobs Table */}
-        <div className="bg-white shadow rounded-lg">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">Recent Jobs</h2>
+        <div className={`shadow rounded-lg transition-colors ${
+          darkMode ? 'bg-gray-800' : 'bg-white'
+        }`}>
+          <div className={`px-6 py-4 border-b transition-colors ${
+            darkMode ? 'border-gray-700' : 'border-gray-200'
+          }`}>
+            <h2 className={`text-lg font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              Recent Jobs
+            </h2>
           </div>
-          <JobsTable jobs={jobs} onCancelJob={handleCancelJob} />
+          <JobsTable jobs={jobs} onCancelJob={handleCancelJob} darkMode={darkMode} />
         </div>
       </main>
     </div>

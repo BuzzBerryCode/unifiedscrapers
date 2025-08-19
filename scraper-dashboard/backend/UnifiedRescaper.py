@@ -961,17 +961,18 @@ async def rescrape_and_update_creator(creator):
         print(f"      Calculated changes: Followers: {followers_change:.2f}%, ER: {er_change:.2f}%, Views: {views_change:.2f}%, Likes: {likes_change:.2f}%, Comments: {comments_change:.2f}%")
 
         # Prepare update payload with proper type conversion
+        # NOTE: All *_change columns in database are INTEGER, so we need to convert percentages to integers
         update_payload = {
             "buzz_score": safe_int(buzz_score),
-            "followers_change": safe_float(followers_change), 
+            "followers_change": safe_int(followers_change),  # Convert percentage to integer 
             "followers_change_type": followers_change_type,
-            "engagement_rate_change": safe_float(er_change), 
+            "engagement_rate_change": safe_int(er_change),  # Convert percentage to integer
             "engagement_rate_change_type": er_change_type,
-            "average_views_change": safe_float(views_change), 
+            "average_views_change": safe_int(views_change),  # Convert percentage to integer
             "average_views_change_type": views_change_type,
-            "average_likes_change": safe_float(likes_change), 
+            "average_likes_change": safe_int(likes_change),  # Convert percentage to integer
             "average_likes_change_type": likes_change_type,
-            "average_comments_change": safe_float(comments_change), 
+            "average_comments_change": safe_int(comments_change),  # Convert percentage to integer
             "average_comments_change_type": comments_change_type,
             "primary_niche": creator.get("primary_niche"),
             "secondary_niche": creator.get("secondary_niche"),
@@ -1010,11 +1011,11 @@ async def rescrape_and_update_creator(creator):
                 update_payload['average_likes'] = safe_int(avg_likes)
         
         print(f"   🔍 Final update payload verification:")
-        print(f"      followers_change: {update_payload.get('followers_change')} (type: {type(update_payload.get('followers_change'))})")
-        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change')} (type: {type(update_payload.get('engagement_rate_change'))})")
-        print(f"      average_views_change: {update_payload.get('average_views_change')} (type: {type(update_payload.get('average_views_change'))})")
-        print(f"      average_likes_change: {update_payload.get('average_likes_change')} (type: {type(update_payload.get('average_likes_change'))})")
-        print(f"      average_comments_change: {update_payload.get('average_comments_change')} (type: {type(update_payload.get('average_comments_change'))})")
+        print(f"      followers_change: {update_payload.get('followers_change')} (type: {type(update_payload.get('followers_change'))}) - represents {followers_change:.2f}%")
+        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change')} (type: {type(update_payload.get('engagement_rate_change'))}) - represents {er_change:.2f}%")
+        print(f"      average_views_change: {update_payload.get('average_views_change')} (type: {type(update_payload.get('average_views_change'))}) - represents {views_change:.2f}%")
+        print(f"      average_likes_change: {update_payload.get('average_likes_change')} (type: {type(update_payload.get('average_likes_change'))}) - represents {likes_change:.2f}%")
+        print(f"      average_comments_change: {update_payload.get('average_comments_change')} (type: {type(update_payload.get('average_comments_change'))}) - represents {comments_change:.2f}%")
         print(f"      followers_count: {update_payload.get('followers_count')} (type: {type(update_payload.get('followers_count'))})")
         print(f"      buzz_score: {update_payload.get('buzz_score')} (type: {type(update_payload.get('buzz_score'))})")
 

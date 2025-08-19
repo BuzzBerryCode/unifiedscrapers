@@ -784,12 +784,18 @@ async def force_continue_job(
         
         job = job_response.data[0]
         
-        # Only allow for running jobs
-        if job["status"] != "running":
-            raise HTTPException(status_code=400, detail=f"Job is not running (current status: {job['status']})")
+        # Allow for running, failed, or cancelled jobs
+        if job["status"] not in ["running", "failed", "cancelled"]:
+            raise HTTPException(status_code=400, detail=f"Job cannot be force continued (current status: {job['status']})")
         
         # Get current progress to resume from
         resume_from_index = job.get("processed_items", 0)
+        
+        # Update job status to running
+        client.table("scraper_jobs").update({
+            "status": "running",
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", job_id).execute()
         
         # Force restart the job from current position
         celery = get_celery_app()
@@ -805,6 +811,8 @@ async def force_continue_job(
                 print(f"🔄 Force continued rescrape job {job_id} from index {resume_from_index}")
             else:
                 raise HTTPException(status_code=400, detail=f"Force continue not supported for job type: {job['job_type']}")
+        else:
+            raise HTTPException(status_code=500, detail="Celery not available")
         
         return {
             "message": f"Job {job_id} force continued from index {resume_from_index}",
@@ -814,6 +822,76 @@ async def force_continue_job(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error force continuing job: {str(e)}")
+
+@app.post("/jobs/{job_id}/direct-restart")
+async def direct_restart_job(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Directly restart a job by running it in a background thread (bypasses Celery)."""
+    import threading
+    import asyncio
+    from tasks import process_new_creators
+    
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get the job details
+        job_response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        resume_from_index = job.get("processed_items", 0)
+        
+        # Update job status to running
+        client.table("scraper_jobs").update({
+            "status": "running",
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", job_id).execute()
+        
+        # Run the job directly in a background thread
+        def run_job_directly():
+            try:
+                if job["job_type"] == "new_creators":
+                    # Create a new event loop for this thread
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    # Import and run the task function directly
+                    from tasks import process_new_creators
+                    task_instance = process_new_creators()
+                    task_instance.apply(args=[job_id, resume_from_index])
+                    
+                    loop.close()
+                else:
+                    print(f"Direct restart not implemented for job type: {job['job_type']}")
+            except Exception as e:
+                print(f"❌ Direct job execution failed: {e}")
+                # Update job status to failed
+                try:
+                    client.table("scraper_jobs").update({
+                        "status": "failed",
+                        "error_message": str(e),
+                        "updated_at": datetime.utcnow().isoformat()
+                    }).eq("id", job_id).execute()
+                except:
+                    pass
+        
+        # Start the job in a background thread
+        thread = threading.Thread(target=run_job_directly, daemon=True)
+        thread.start()
+        
+        return {
+            "message": f"Job {job_id} started directly (bypassing Celery)",
+            "resume_from_index": resume_from_index,
+            "total_items": job.get("total_items", 0)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error directly restarting job: {str(e)}")
 
 @app.post("/jobs/{job_id}/trigger")
 async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):

@@ -9,8 +9,8 @@ import json
 import sys
 from datetime import datetime
 
-# Configuration
-API_BASE_URL = "https://unified-scrapers-backend-production.up.railway.app"
+# Configuration - Update with your actual Railway URL
+API_BASE_URL = "https://scraper-dashboard-backend-production.up.railway.app"
 USERNAME = "admin"  # Update if different
 PASSWORD = "buzzberry123"  # Update if different
 

@@ -178,9 +178,24 @@ def process_new_creators(self, job_id: str):
                 
                 processed_items += 1
                 
-                # Update progress every 5 items
+                # Update progress every 5 items and store intermediate results
                 if i % 5 == 0:
                     update_job_progress(job_id, processed_items, failed_items)
+                    # Store intermediate results including niche stats
+                    intermediate_results = {
+                        "added": results["added"].copy(),
+                        "failed": results["failed"].copy(), 
+                        "skipped": results["skipped"].copy(),
+                        "filtered": results["filtered"].copy(),
+                        "niche_stats": niche_stats.copy()
+                    }
+                    update_job_status(
+                        job_id,
+                        "running",
+                        processed_items=processed_items,
+                        failed_items=failed_items,
+                        results=intermediate_results
+                    )
                 
             except Exception as e:
                 print(f"Error processing @{username}: {e}")

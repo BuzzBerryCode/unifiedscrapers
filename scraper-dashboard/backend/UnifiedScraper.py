@@ -475,7 +475,7 @@ def process_instagram_user(username_input):
 
     if posts_response.status_code != 200:
         print(f"❌ Failed to fetch post data: {posts_response.status_code}")
-        return None
+        return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
 
     try:
         posts_data = posts_response.json().get("items", [])

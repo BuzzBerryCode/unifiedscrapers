@@ -120,9 +120,48 @@ def process_new_creators(self, job_id: str):
                     processed_items += 1
                     continue
                 
-                # Process based on platform
+                # Process based on platform with timeout protection
+                start_time = time.time()
+                try:
+                    if platform == 'instagram':
+                        # Use asyncio.wait_for with timeout protection
+                        result = asyncio.run(
+                            asyncio.wait_for(
+                                asyncio.to_thread(process_instagram_user, username),
+                                timeout=180  # 3 minute timeout per creator
+                            )
+                        )
+                    elif platform == 'tiktok':
+                        # Use asyncio.wait_for with timeout protection  
+                        result = asyncio.run(
+                            asyncio.wait_for(
+                                asyncio.to_thread(process_tiktok_account, username, SCRAPECREATORS_API_KEY),
+                                timeout=180  # 3 minute timeout per creator
+                            )
+                        )
+                    else:
+                        print(f"❌ Unknown platform: {platform}")
+                        results["failed"].append(f"@{username} - unknown platform: {platform}")
+                        failed_items += 1
+                        processed_items += 1
+                        continue
+                except asyncio.TimeoutError:
+                    processing_time = time.time() - start_time
+                    print(f"⏰ TIMEOUT: @{username} processing exceeded 3 minutes ({processing_time:.2f}s)")
+                    results["failed"].append(f"@{username} - Processing timeout after {processing_time:.2f}s")
+                    failed_items += 1
+                    processed_items += 1
+                    continue
+                except Exception as e:
+                    processing_time = time.time() - start_time
+                    print(f"❌ CRITICAL ERROR: @{username} processing failed after {processing_time:.2f}s: {e}")
+                    results["failed"].append(f"@{username} - Critical error: {str(e)}")
+                    failed_items += 1
+                    processed_items += 1
+                    continue
+                
+                # Process the result
                 if platform == 'instagram':
-                    result = process_instagram_user(username)
                     if result and isinstance(result, dict):
                         if 'error' in result:
                             # Handle different error types
@@ -154,24 +193,31 @@ def process_new_creators(self, job_id: str):
                         failed_items += 1
                         
                 elif platform == 'tiktok':
-                    from UnifiedScraper import SCRAPECREATORS_API_KEY
-                    influencer_data = process_tiktok_account(username, SCRAPECREATORS_API_KEY)
-                    if influencer_data:
-                        response = supabase.table("creatordata").insert(influencer_data).execute()
-                        if response.data:
-                            creator_id = response.data[0].get('id')
-                            if creator_id:
-                                asyncio.run(process_creator_media(creator_id, username, influencer_data))
-                        results["added"].append(f"@{username} (TikTok)")
-                        
-                        # Track niche statistics
-                        primary_niche = influencer_data.get('primary_niche')
-                        secondary_niche = influencer_data.get('secondary_niche')
-                        
-                        if primary_niche:
-                            niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
-                        if secondary_niche:
-                            niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
+                    if result and isinstance(result, dict):
+                        if 'error' in result:
+                            # Handle different error types
+                            if result['error'] == 'filtered':
+                                results["filtered"].append(f"@{username} - {result['message']}")
+                            else:  # api_error or other errors
+                                results["failed"].append(f"@{username} - {result['message']}")
+                                failed_items += 1
+                        else:
+                            # Successfully processed - insert into database
+                            response = supabase.table("creatordata").insert(result).execute()
+                            if response.data:
+                                creator_id = response.data[0].get('id')
+                                if creator_id:
+                                    asyncio.run(process_creator_media(creator_id, username, result))
+                            results["added"].append(f"@{username} (TikTok)")
+                            
+                            # Track niche statistics
+                            primary_niche = result.get('primary_niche')
+                            secondary_niche = result.get('secondary_niche')
+                            
+                            if primary_niche:
+                                niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
+                            if secondary_niche:
+                                niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
                     else:
                         results["failed"].append(f"@{username} - failed to process")
                         failed_items += 1

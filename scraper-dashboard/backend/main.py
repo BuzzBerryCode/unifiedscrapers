@@ -184,39 +184,53 @@ def check_running_jobs() -> bool:
 def start_next_queued_job():
     """Start the next queued job if no jobs are running."""
     try:
+        print("🔄 Checking for queued jobs...")
         if check_running_jobs():
+            print("⏸️ Already have a running job, skipping")
             return  # Already have a running job
         
         client = get_supabase_client()
         if not client:
+            print("❌ No Supabase client available")
             return
         
         # Get the oldest pending or queued job
         response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
+        print(f"📋 Found {len(response.data)} pending/queued jobs")
         
         if response.data:
             job = response.data[0]
             job_id = job["id"]
+            job_type = job["job_type"]
+            print(f"🚀 Starting job {job_id} ({job_type})")
             
             # Update status to running
             client.table("scraper_jobs").update({"status": "running", "updated_at": datetime.utcnow().isoformat()}).eq("id", job_id).execute()
+            print(f"✅ Updated job {job_id} status to running")
             
             # Start the appropriate Celery task
             celery = get_celery_app()
             if celery:
                 if job["job_type"] == "new_creators":
+                    print(f"📤 Sending new_creators task for job {job_id}")
                     celery.send_task("tasks.process_new_creators", args=[job_id])
                 elif job["job_type"] == "rescrape_platform":
                     # Extract platform from description or default to Instagram
                     platform = "Instagram"
                     if "TikTok" in job.get("description", ""):
                         platform = "TikTok"
+                    print(f"📤 Sending rescrape_platform task for job {job_id} ({platform})")
                     celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform])
-                
-                print(f"Started queued job: {job_id}")
+                print(f"🎯 Task sent successfully for job {job_id}")
+            else:
+                print("❌ No Celery app available")
+        else:
+            print("📭 No pending/queued jobs found")
     
     except Exception as e:
-        print(f"Error starting next queued job: {e}")
+        print(f"❌ Error starting next queued job: {e}")
+        import traceback
+        traceback.print_exc()
 
 def create_job(job_type: str, description: str = "", total_items: int = 0) -> str:
     """Create a new job in the database with proper queuing."""

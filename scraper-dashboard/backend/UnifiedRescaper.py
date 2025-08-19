@@ -23,35 +23,7 @@ from functools import wraps
 import sys
 
 # ==================== TIMEOUT PROTECTION ====================
-
-class TimeoutError(Exception):
-    pass
-
-def timeout_handler(signum, frame):
-    raise TimeoutError("Operation timed out")
-
-def with_timeout(seconds):
-    """Decorator to add timeout protection to functions."""
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            # Set the signal handler and a timeout alarm
-            old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(seconds)
-            
-            try:
-                result = func(*args, **kwargs)
-            except TimeoutError:
-                print(f"⏰ Function {func.__name__} timed out after {seconds} seconds")
-                return None
-            finally:
-                # Disable the alarm and restore the old handler
-                signal.alarm(0)
-                signal.signal(signal.SIGALRM, old_handler)
-            
-            return result
-        return wrapper
-    return decorator
+# Using asyncio-based timeouts instead of signal-based ones for better compatibility
 
 async def with_timeout_async(coro, timeout_seconds):
     """Add timeout protection to async functions."""
@@ -281,32 +253,53 @@ def calculate_buzz_score(new_data, existing_data):
 
 # ==================== MEDIA PROCESSING FUNCTIONS ====================
 
-@with_timeout(30)  # 30 second timeout for downloads
-def download_file(url: str) -> bytes:
+async def download_file(url: str) -> bytes:
     """Download file from URL and return its content as bytes."""
     try:
         print(f"⬇️ Downloading: {url[:50]}...")
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        print(f"✅ Downloaded {len(response.content)} bytes")
-        return response.content
-    except requests.RequestException as e:
+        
+        # Use aiohttp with proper timeout
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                response.raise_for_status()
+                content = await response.read()
+                print(f"✅ Downloaded {len(content)} bytes")
+                return content
+                
+    except Exception as e:
         print(f"❌ Error downloading {url}: {e}")
         return None
 
-@with_timeout(20)  # 20 second timeout for uploads
-def upload_to_supabase_storage(bucket: str, path: str, file_content: bytes, content_type: str = None) -> str:
+async def upload_to_supabase_storage(bucket: str, path: str, file_content: bytes, content_type: str = None) -> str:
     """Upload file to Supabase storage and return public URL."""
     try:
         print(f"⬆️ Uploading to: {path}")
-        res = supabase.storage.from_(bucket).upload(
-            path=path,
-            file=file_content,
-            file_options={"content-type": content_type, "upsert": "true"}
+        
+        # Use asyncio timeout instead of signal-based timeout
+        upload_task = asyncio.create_task(
+            asyncio.to_thread(
+                lambda: supabase.storage.from_(bucket).upload(
+                    path=path,
+                    file=file_content,
+                    file_options={"content-type": content_type, "upsert": "true"}
+                )
+            )
         )
+        
+        # 20 second timeout using asyncio
+        res = await asyncio.wait_for(upload_task, timeout=20)
         url = supabase.storage.from_(bucket).get_public_url(path)
         print(f"✅ Upload successful: {path}")
         return url
+        
+    except asyncio.TimeoutError:
+        print(f"⏰ Upload timeout after 20 seconds for {path}")
+        try:
+            return supabase.storage.from_(bucket).get_public_url(path)
+        except Exception as e2:
+            print(f"❌ Could not get public URL for {path}. Error: {e2}")
+            return None
     except Exception as e:
         print(f"❌ Upload failed for {path}, attempting to get existing URL. Error: {e}")
         try:
@@ -371,10 +364,10 @@ async def process_creator_media(creator_id: str, handle: str, creator_data: dict
         profile_storage_path = f"{storage_folder}profile{profile_ext}"
         
         print(f"🖼️ Downloading profile image for @{handle}...")
-        profile_content = download_file(creator_data["profile_image_url"])
+        profile_content = await download_file(creator_data["profile_image_url"])
         
         if profile_content:
-            new_url = upload_to_supabase_storage(
+            new_url = await upload_to_supabase_storage(
                 BUCKET_NAME, profile_storage_path, profile_content, profile_content_type
             )
             if new_url:
@@ -415,10 +408,10 @@ async def process_creator_media(creator_id: str, handle: str, creator_data: dict
                 
                 ext, content_type = get_file_extension_and_type(media_url)
                 media_storage_path = f"{storage_folder}media_{processed_media + 1}{ext}"
-                file_content = download_file(media_url)
+                file_content = await download_file(media_url)
                 
                 if file_content:
-                    new_url = upload_to_supabase_storage(BUCKET_NAME, media_storage_path, file_content, content_type)
+                    new_url = await upload_to_supabase_storage(BUCKET_NAME, media_storage_path, file_content, content_type)
                     if new_url:
                         new_media_urls.append(new_url)
                         processed_media += 1

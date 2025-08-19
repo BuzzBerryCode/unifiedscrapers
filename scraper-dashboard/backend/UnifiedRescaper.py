@@ -929,6 +929,25 @@ async def rescrape_and_update_creator(creator):
         likes_change, likes_change_type = calculate_change(new_likes_value, old_avg_likes)
         comments_change, comments_change_type = calculate_change(new_data.get('average_comments'), creator.get('average_comments'))
         
+        # Ensure all numeric values are properly typed for database
+        def safe_int(value):
+            """Convert value to int, handling None and float values."""
+            if value is None:
+                return None
+            try:
+                return int(float(value)) if value != '' else None
+            except (ValueError, TypeError):
+                return None
+        
+        def safe_float(value):
+            """Convert value to float, handling None values."""
+            if value is None:
+                return None
+            try:
+                return float(value) if value != '' else None
+            except (ValueError, TypeError):
+                return None
+        
         print(f"   📊 Change calculation for @{handle}:")
         print(f"      Followers: {creator.get('followers_count')} → {new_data.get('followers_count')}")
         print(f"      Engagement Rate: {creator.get('engagement_rate')} → {new_data.get('engagement_rate')}")
@@ -937,20 +956,45 @@ async def rescrape_and_update_creator(creator):
         print(f"      Avg Comments: {creator.get('average_comments')} → {new_data.get('average_comments')}")
         print(f"      Calculated changes: Followers: {followers_change:.2f}%, ER: {er_change:.2f}%, Views: {views_change:.2f}%, Likes: {likes_change:.2f}%, Comments: {comments_change:.2f}%")
 
-        # Prepare update payload
+        # Prepare update payload with proper type conversion
         update_payload = {
             **new_data,
-            "buzz_score": buzz_score,
-            "followers_change": followers_change, "followers_change_type": followers_change_type,
-            "engagement_rate_change": er_change, "engagement_rate_change_type": er_change_type,
-            "average_views_change": views_change, "average_views_change_type": views_change_type,
-            "average_likes_change": likes_change, "average_likes_change_type": likes_change_type,
-            "average_comments_change": comments_change, "average_comments_change_type": comments_change_type,
+            "buzz_score": safe_int(buzz_score),
+            "followers_change": safe_float(followers_change), "followers_change_type": followers_change_type,
+            "engagement_rate_change": safe_float(er_change), "engagement_rate_change_type": er_change_type,
+            "average_views_change": safe_float(views_change), "average_views_change_type": views_change_type,
+            "average_likes_change": safe_float(likes_change), "average_likes_change_type": likes_change_type,
+            "average_comments_change": safe_float(comments_change), "average_comments_change_type": comments_change_type,
             "primary_niche": creator.get("primary_niche"),
             "secondary_niche": creator.get("secondary_niche"),
             "location": creator.get("location"),
             "updated_at": datetime.now().isoformat(),
         }
+        
+        # Ensure integer fields in new_data are properly converted
+        if 'followers_count' in update_payload:
+            update_payload['followers_count'] = safe_int(update_payload['followers_count'])
+        if 'average_views' in update_payload:
+            update_payload['average_views'] = safe_int(update_payload['average_views'])
+        if 'average_comments' in update_payload:
+            update_payload['average_comments'] = safe_int(update_payload['average_comments'])
+        if 'engagement_rate' in update_payload:
+            update_payload['engagement_rate'] = safe_float(update_payload['engagement_rate'])
+        
+        # Handle average_likes which might be a dict or number
+        if 'average_likes' in update_payload:
+            avg_likes = update_payload['average_likes']
+            if isinstance(avg_likes, dict):
+                # Keep as dict but ensure numeric values are properly typed
+                if 'avg_value' in avg_likes:
+                    avg_likes['avg_value'] = safe_int(avg_likes['avg_value'])
+                if 'median_value' in avg_likes:
+                    avg_likes['median_value'] = safe_int(avg_likes['median_value'])
+                if 'std_dev' in avg_likes:
+                    avg_likes['std_dev'] = safe_float(avg_likes['std_dev'])
+            else:
+                # Convert to int if it's a simple number
+                update_payload['average_likes'] = safe_int(avg_likes)
         
         print(f"   🔍 Final update payload verification:")
         print(f"      followers_change: {update_payload.get('followers_change'):.2f}% (stored as {update_payload.get('followers_change')})")

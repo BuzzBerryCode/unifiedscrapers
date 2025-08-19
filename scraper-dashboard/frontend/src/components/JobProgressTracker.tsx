@@ -3,31 +3,14 @@ import {
   CheckCircleIcon, 
   XCircleIcon, 
   ClockIcon, 
-  ExclamationTriangleIcon,
-  TrashIcon,
   ArrowPathIcon,
   PlayIcon,
   PauseIcon
 } from '@heroicons/react/24/outline';
-
-interface JobProgress {
-  id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  processed_items: number;
-  total_items: number;
-  failed_items: number;
-  description: string;
-  created_at: string;
-  updated_at: string;
-  results?: {
-    updated?: string[];
-    deleted?: string[];
-    failed?: string[];
-  };
-}
+import { Job } from '@/types';
 
 interface JobProgressTrackerProps {
-  job: JobProgress;
+  job: Job;
   darkMode: boolean;
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
@@ -38,8 +21,11 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
   const [errorBreakdown, setErrorBreakdown] = useState<{[key: string]: number}>({});
 
   // Calculate progress percentage
-  const progressPercentage = job.total_items > 0 ? (job.processed_items / job.total_items) * 100 : 0;
-  const successItems = job.processed_items - job.failed_items;
+  const processedItems = job.processed_items || 0;
+  const totalItems = job.total_items || 0;
+  const failedItems = job.failed_items || 0;
+  const progressPercentage = totalItems > 0 ? (processedItems / totalItems) * 100 : 0;
+  const successItems = processedItems - failedItems;
 
   // Analyze error patterns
   useEffect(() => {
@@ -158,7 +144,7 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
       <div className="mb-3">
         <div className="flex justify-between text-sm mb-1">
           <span className={darkMode ? 'text-gray-300' : 'text-gray-600'}>
-            Progress: {job.processed_items}/{job.total_items}
+            Progress: {processedItems}/{totalItems}
           </span>
           <span className={darkMode ? 'text-gray-300' : 'text-gray-600'}>
             {progressPercentage.toFixed(1)}%
@@ -170,15 +156,15 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
             {/* Success portion */}
             <div 
               className="absolute left-0 top-0 h-full bg-green-500 transition-all duration-300"
-              style={{ width: `${job.total_items > 0 ? (successItems / job.total_items) * 100 : 0}%` }}
+              style={{ width: `${totalItems > 0 ? (successItems / totalItems) * 100 : 0}%` }}
             ></div>
             
             {/* Failed portion */}
             <div 
               className="absolute top-0 h-full bg-red-500 transition-all duration-300"
               style={{ 
-                left: `${job.total_items > 0 ? (successItems / job.total_items) * 100 : 0}%`,
-                width: `${job.total_items > 0 ? (job.failed_items / job.total_items) * 100 : 0}%`
+                left: `${totalItems > 0 ? (successItems / totalItems) * 100 : 0}%`,
+                width: `${totalItems > 0 ? (failedItems / totalItems) * 100 : 0}%`
               }}
             ></div>
           </div>
@@ -188,9 +174,9 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
           <span className="text-green-600 dark:text-green-400">
             ✅ {successItems} successful
           </span>
-          {job.failed_items > 0 && (
+          {failedItems > 0 && (
             <span className="text-red-600 dark:text-red-400">
-              ❌ {job.failed_items} failed
+              ❌ {failedItems} failed
             </span>
           )}
         </div>

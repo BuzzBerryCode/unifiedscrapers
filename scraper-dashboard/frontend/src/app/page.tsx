@@ -5,16 +5,7 @@ import Image from 'next/image'
 import dynamic from 'next/dynamic'
 import { toast, Toaster } from 'react-hot-toast'
 import { 
-  CloudArrowUpIcon, 
   PlayIcon, 
-  PauseIcon,
-  TrashIcon,
-  ChartBarIcon,
-  UsersIcon,
-  ClockIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  ExclamationTriangleIcon,
   SunIcon,
   MoonIcon
 } from '@heroicons/react/24/outline'
@@ -143,7 +134,7 @@ export default function Dashboard() {
 
   const handleResumeJob = useCallback(async (jobId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/resume`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}/resume`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -167,7 +158,7 @@ export default function Dashboard() {
 
   const handleCancelJob = useCallback(async (jobId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -298,26 +289,6 @@ export default function Dashboard() {
       }
     } catch {
       toast.error('Failed to create TikTok rescrape job')
-    }
-  }
-
-  const handleCancelJob = async (jobId: string) => {
-    if (!token) return
-
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      })
-
-      if (response.ok) {
-        toast.success('Job cancelled successfully')
-        fetchData()
-      } else {
-        toast.error('Failed to cancel job')
-      }
-    } catch {
-      toast.error('Failed to cancel job')
     }
   }
 

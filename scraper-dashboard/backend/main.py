@@ -398,10 +398,8 @@ async def upload_csv(
         if redis:
             redis.setex(f"job_data:{job_id}", 3600, json.dumps(csv_data))
         
-        # Queue the job
-        celery = get_celery_app()
-        if celery:
-            celery.send_task("tasks.process_new_creators", args=[job_id])
+        # The job will be started automatically by create_job if no jobs are running
+        # If jobs are running, it will be queued and started when the current job completes
         
         return {
             "job_id": job_id,

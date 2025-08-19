@@ -615,6 +615,27 @@ async def resume_queue(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resuming queue: {str(e)}")
 
+@app.get("/jobs/running")
+async def get_running_jobs(
+    current_user: str = Depends(verify_token)
+):
+    """Get detailed information about all running jobs."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get all running jobs with full details
+        response = client.table("scraper_jobs").select("*").eq("status", "running").execute()
+        
+        return {
+            "running_jobs": response.data,
+            "count": len(response.data)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting running jobs: {str(e)}")
+
 @app.get("/jobs/queue-status")
 async def get_queue_status(
     current_user: str = Depends(verify_token)

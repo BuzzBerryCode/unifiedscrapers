@@ -932,20 +932,24 @@ async def rescrape_and_update_creator(creator):
         # Ensure all numeric values are properly typed for database
         def safe_int(value):
             """Convert value to int, handling None and float values."""
-            if value is None:
+            if value is None or value == '':
                 return None
             try:
-                return int(float(value)) if value != '' else None
+                # Convert to float first to handle string floats, then to int
+                float_val = float(value)
+                return int(float_val)
             except (ValueError, TypeError):
+                print(f"⚠️ Could not convert to int: {value} (type: {type(value)})")
                 return None
         
         def safe_float(value):
             """Convert value to float, handling None values."""
-            if value is None:
+            if value is None or value == '':
                 return None
             try:
-                return float(value) if value != '' else None
+                return float(value)
             except (ValueError, TypeError):
+                print(f"⚠️ Could not convert to float: {value} (type: {type(value)})")
                 return None
         
         print(f"   📊 Change calculation for @{handle}:")
@@ -958,18 +962,27 @@ async def rescrape_and_update_creator(creator):
 
         # Prepare update payload with proper type conversion
         update_payload = {
-            **new_data,
             "buzz_score": safe_int(buzz_score),
-            "followers_change": safe_float(followers_change), "followers_change_type": followers_change_type,
-            "engagement_rate_change": safe_float(er_change), "engagement_rate_change_type": er_change_type,
-            "average_views_change": safe_float(views_change), "average_views_change_type": views_change_type,
-            "average_likes_change": safe_float(likes_change), "average_likes_change_type": likes_change_type,
-            "average_comments_change": safe_float(comments_change), "average_comments_change_type": comments_change_type,
+            "followers_change": safe_float(followers_change), 
+            "followers_change_type": followers_change_type,
+            "engagement_rate_change": safe_float(er_change), 
+            "engagement_rate_change_type": er_change_type,
+            "average_views_change": safe_float(views_change), 
+            "average_views_change_type": views_change_type,
+            "average_likes_change": safe_float(likes_change), 
+            "average_likes_change_type": likes_change_type,
+            "average_comments_change": safe_float(comments_change), 
+            "average_comments_change_type": comments_change_type,
             "primary_niche": creator.get("primary_niche"),
             "secondary_niche": creator.get("secondary_niche"),
             "location": creator.get("location"),
             "updated_at": datetime.now().isoformat(),
         }
+        
+        # Add new_data fields with proper type conversion
+        for key, value in new_data.items():
+            if key not in update_payload:  # Don't override already set fields
+                update_payload[key] = value
         
         # Ensure integer fields in new_data are properly converted
         if 'followers_count' in update_payload:
@@ -997,11 +1010,13 @@ async def rescrape_and_update_creator(creator):
                 update_payload['average_likes'] = safe_int(avg_likes)
         
         print(f"   🔍 Final update payload verification:")
-        print(f"      followers_change: {update_payload.get('followers_change'):.2f}% (stored as {update_payload.get('followers_change')})")
-        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change'):.2f}% (stored as {update_payload.get('engagement_rate_change')})")
-        print(f"      average_views_change: {update_payload.get('average_views_change'):.2f}% (stored as {update_payload.get('average_views_change')})")
-        print(f"      average_likes_change: {update_payload.get('average_likes_change'):.2f}% (stored as {update_payload.get('average_likes_change')})")
-        print(f"      average_comments_change: {update_payload.get('average_comments_change'):.2f}% (stored as {update_payload.get('average_comments_change')})")
+        print(f"      followers_change: {update_payload.get('followers_change')} (type: {type(update_payload.get('followers_change'))})")
+        print(f"      engagement_rate_change: {update_payload.get('engagement_rate_change')} (type: {type(update_payload.get('engagement_rate_change'))})")
+        print(f"      average_views_change: {update_payload.get('average_views_change')} (type: {type(update_payload.get('average_views_change'))})")
+        print(f"      average_likes_change: {update_payload.get('average_likes_change')} (type: {type(update_payload.get('average_likes_change'))})")
+        print(f"      average_comments_change: {update_payload.get('average_comments_change')} (type: {type(update_payload.get('average_comments_change'))})")
+        print(f"      followers_count: {update_payload.get('followers_count')} (type: {type(update_payload.get('followers_count'))})")
+        print(f"      buzz_score: {update_payload.get('buzz_score')} (type: {type(update_payload.get('buzz_score'))})")
 
         # Process media files
         print(f"   ⬇️ Downloading media for @{handle}...")

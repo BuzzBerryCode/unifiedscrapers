@@ -688,6 +688,26 @@ async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error triggering job: {str(e)}")
 
+@app.get("/creators/check/{handle}")
+async def check_creator_data(
+    handle: str,
+    current_user: str = Depends(verify_token)
+):
+    """Check a specific creator's data including location."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        response = client.table("creatordata").select("handle,location,primary_niche,secondary_niche,platform,created_at").eq("handle", handle).execute()
+        
+        if not response.data:
+            raise HTTPException(status_code=404, detail="Creator not found")
+        
+        return response.data[0]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching creator: {str(e)}")
+
 @app.get("/stats")
 async def get_dashboard_stats(current_user: str = Depends(verify_token)):
     """Get dashboard statistics."""

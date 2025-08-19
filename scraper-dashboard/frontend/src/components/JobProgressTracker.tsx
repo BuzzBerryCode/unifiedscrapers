@@ -231,9 +231,108 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
             </div>
           )}
 
+          {/* Niche Breakdown for New Creator Jobs */}
+          {job.results && job.results.niche_stats && (job.results.niche_stats.primary_niches || job.results.niche_stats.secondary_niches) && (
+            <div className={`p-4 rounded-lg mb-4 ${
+              darkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200'
+            }`}>
+              <h4 className={`text-sm font-medium mb-2 ${darkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                📊 Niche Breakdown
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {job.results.niche_stats.primary_niches && Object.keys(job.results.niche_stats.primary_niches).length > 0 && (
+                  <div>
+                    <h5 className={`text-xs font-medium mb-1 ${darkMode ? 'text-blue-400' : 'text-blue-700'}`}>Primary Niches:</h5>
+                    {Object.entries(job.results.niche_stats.primary_niches)
+                      .sort(([,a], [,b]) => (b as number) - (a as number))
+                      .map(([niche, count]) => (
+                        <div key={niche} className={`text-xs flex justify-between ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                          <span>• {niche}</span>
+                          <span className="font-medium">{count}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+                {job.results.niche_stats.secondary_niches && Object.keys(job.results.niche_stats.secondary_niches).length > 0 && (
+                  <div>
+                    <h5 className={`text-xs font-medium mb-1 ${darkMode ? 'text-purple-400' : 'text-purple-700'}`}>Secondary Niches:</h5>
+                    {Object.entries(job.results.niche_stats.secondary_niches)
+                      .sort(([,a], [,b]) => (b as number) - (a as number))
+                      .map(([niche, count]) => (
+                        <div key={niche} className={`text-xs flex justify-between ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                          <span>• {niche}</span>
+                          <span className="font-medium">{count}</span>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Results Summary */}
           {job.results && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {job.results.added && job.results.added.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-green-600 dark:text-green-400`}>
+                    ✅ Added ({job.results.added.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.added.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.added.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.added.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {job.results.skipped && job.results.skipped.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-blue-600 dark:text-blue-400`}>
+                    ⏭️ Skipped ({job.results.skipped.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.skipped.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.skipped.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.skipped.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {job.results.filtered && job.results.filtered.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-yellow-600 dark:text-yellow-400`}>
+                    🔍 Filtered ({job.results.filtered.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.filtered.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.filtered.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.filtered.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {job.results.updated && job.results.updated.length > 0 && (
                 <div>
                   <h5 className={`font-medium mb-1 text-green-600 dark:text-green-400`}>

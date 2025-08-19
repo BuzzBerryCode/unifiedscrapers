@@ -271,28 +271,50 @@ PRESET_FINANCE_NICHES = [
 
 
 # --- AI Helper Functions ---
+
+def safe_gemini_call(prompt: str, timeout_seconds: int = 30, default_response: str = ""):
+    """Helper function to make Gemini API calls with timeout protection."""
+    import threading
+    
+    result = None
+    exception = None
+    
+    def ai_call():
+        nonlocal result, exception
+        try:
+            response = gemini_model.generate_content(prompt)
+            result = response.text.strip()
+        except Exception as e:
+            exception = e
+    
+    thread = threading.Thread(target=ai_call)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout=timeout_seconds)
+    
+    if thread.is_alive():
+        print(f"⏰ Gemini AI timeout ({timeout_seconds}s limit)")
+        return default_response
+    
+    if exception:
+        print(f"⚠️ Gemini AI error: {exception}")
+        return default_response
+        
+    return result if result is not None else default_response
+
 def is_niche_influencer(niche_name: str, criteria: str, bio: str, username: str, display_name: str = "") -> bool:
     """Generic Gemini AI function to classify a user's primary niche."""
     print(f"🧠 Checking if @{username} is a {niche_name} influencer...")
     prompt = f'Analyze the social media username, display name, and bio. Is this user a {niche_name}-related influencer (mentions {criteria})? Respond with ONLY "Yes" or "No".\nUSERNAME: {username}\nDISPLAY NAME: {display_name}\nBIO: {bio}'
-    try:
-        response = gemini_model.generate_content(prompt)
-        return "yes" in response.text.strip().lower()
-    except Exception as e:
-        print(f"⚠️ AI error checking for {niche_name} niche: {e}")
-        return False
+    response_text = safe_gemini_call(prompt, timeout_seconds=30, default_response="No")
+    return "yes" in response_text.lower()
 
 def predict_secondary_niche(primary_niche: str, niche_list: list, bio: str, hashtags: list, tagged_users: list) -> str:
     """Generic Gemini AI function to predict a secondary niche."""
     print(f"🔮 Predicting secondary {primary_niche} niche...")
     prompt = f'Analyze this social media account and classify it into ONE specific niche from the provided list. Base your decision on the bio, hashtags, and tagged users.\n\nPRIMARY NICHE: {primary_niche}\nPRESET OPTIONS: {niche_list}\n\nBIO: "{bio}"\nHASHTAGS: {list(set(hashtags))}\nTAGGED USERS: {list(set(tagged_users))}\n\nInstructions:\n- Return ONLY the most appropriate niche name from the preset list.\n- If no specific niche fits well, return "General {primary_niche}".'
-    try:
-        response = gemini_model.generate_content(prompt)
-        niche = response.text.strip()
-        return niche if niche in niche_list else f"General {primary_niche}"
-    except Exception as e:
-        print(f"⚠️ AI error predicting secondary niche: {e}")
-        return f"General {primary_niche}"
+    response_text = safe_gemini_call(prompt, timeout_seconds=30, default_response=f"General {primary_niche}")
+    return response_text if response_text in niche_list else f"General {primary_niche}"
 
 
 def is_trading_influencer(bio: str, all_captions: list = [], all_hashtags: list = [], username: str = "") -> bool:
@@ -307,15 +329,10 @@ def is_trading_influencer(bio: str, all_captions: list = [], all_hashtags: list 
     USERNAME: {username}
     BIO: {bio}
     """
-    try:
-        response = gemini_model.generate_content(prompt)
-        answer = response.text.strip().lower()
-        decision = "yes" in answer
-        print(f"🤖 AI preliminary classification: {'Trading Influencer' if decision else 'Not a Trading Influencer'}")
-        return decision
-    except Exception as e:
-        print(f"⚠️ Error determining influencer type: {e}")
-        return False
+    response_text = safe_gemini_call(prompt, timeout_seconds=30, default_response="No")
+    decision = "yes" in response_text.lower()
+    print(f"🤖 AI preliminary classification: {'Trading Influencer' if decision else 'Not a Trading Influencer'}")
+    return decision
 
 def predict_secondary_niche_instagram(all_hashtags, bio, all_tagged_users):
     print("🔮 Predicting secondary trading niche for Instagram...")
@@ -339,14 +356,9 @@ def predict_secondary_niche_instagram(all_hashtags, bio, all_tagged_users):
     - If trading-related but no clear match, return "General Trading".
     - If not trading-related at all, return "Non-Trading".
     """
-    try:
-        response = gemini_model.generate_content(prompt)
-        niche = response.text.strip()
-        print(f"✅ Predicted trading niche: {niche}")
-        return niche if niche in PRESET_TRADING_NICHES else "General Trading"
-    except Exception as e:
-        print(f"⚠️ Niche prediction failed: {str(e)}")
-        return "General Trading"
+    response_text = safe_gemini_call(prompt, timeout_seconds=30, default_response="General Trading")
+    print(f"✅ Predicted trading niche: {response_text}")
+    return response_text if response_text in PRESET_TRADING_NICHES else "General Trading"
 
 def predict_freeform_location_instagram(all_captions, bio, all_locations):
     print("🌍 Predicting location for Instagram...")
@@ -370,14 +382,9 @@ def predict_freeform_location_instagram(all_captions, bio, all_locations):
         Return ONLY the most relevant location in "City, Country" format. No explanations.
         Example: "Paris, France" or "Global" if uncertain.
     """
-    try:
-        response = gemini_model.generate_content(prompt)
-        location = response.text.strip()
-        print(f"✅ Predicted location: {location}")
-        return location
-    except Exception as e:
-        print(f"⚠️ Location prediction failed: {str(e)}")
-        return None
+    response_text = safe_gemini_call(prompt, timeout_seconds=30, default_response="Global")
+    print(f"✅ Predicted location: {response_text}")
+    return response_text
 
 def get_bio_urls(user_data):
     bio_urls = []
@@ -415,12 +422,7 @@ def predict_freeform_location_tiktok(all_captions, bio, region):
     RESPONSE FORMAT:
     Return ONLY the location (e.g., "Dubai, UAE" or "Global"). Do not add any explanation.
     """
-    try:
-        response = gemini_model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        print(f"⚠️ Location prediction failed: {str(e)}")
-        return "Global"
+    return safe_gemini_call(prompt, timeout_seconds=30, default_response="Global")
 
 
 
@@ -434,11 +436,15 @@ def process_instagram_user(username_input):
     print("\n📡 Fetching profile data from ScrapeCreators API...")
     profile_url = f"https://api.scrapecreators.com/v1/instagram/profile?handle={username_input}"
     headers = {"x-api-key": SCRAPECREATORS_API_KEY}
-    response = requests.get(profile_url, headers=headers)
-
-    if response.status_code != 200:
-        print(f"❌ Failed to fetch profile data: {response.status_code}")
-        return {"error": "api_error", "message": f"API error: {response.status_code}"}
+    
+    try:
+        response = requests.get(profile_url, headers=headers, timeout=20)
+        if response.status_code != 200:
+            print(f"❌ Failed to fetch profile data: {response.status_code}")
+            return {"error": "api_error", "message": f"API error: {response.status_code}"}
+    except requests.RequestException as e:
+        print(f"❌ Profile API request failed: {e}")
+        return {"error": "api_error", "message": f"Profile API request failed: {str(e)}"}
 
     try:
         data = response.json()["data"]["user"]
@@ -471,11 +477,15 @@ def process_instagram_user(username_input):
 
     print("\n📡 Fetching post data from ScrapeCreators API...")
     scrapecreators_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username_input}"
-    posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY})
-
-    if posts_response.status_code != 200:
-        print(f"❌ Failed to fetch post data: {posts_response.status_code}")
-        return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
+    
+    try:
+        posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY}, timeout=20)
+        if posts_response.status_code != 200:
+            print(f"❌ Failed to fetch post data: {posts_response.status_code}")
+            return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
+    except requests.RequestException as e:
+        print(f"❌ Posts API request failed: {e}")
+        return {"error": "api_error", "message": f"Posts API request failed: {str(e)}"}
 
     try:
         posts_data = posts_response.json().get("items", [])
@@ -641,11 +651,15 @@ def process_tiktok_account(username, api_key):
 
     api_url = f"https://api.scrapecreators.com/v3/tiktok/profile/videos?handle={username}"
     headers = {"x-api-key": api_key}
-    response = requests.get(api_url, headers=headers)
-
-    if response.status_code != 200:
-        print(f"❌ Failed to fetch data: {response.status_code}")
-        return None
+    
+    try:
+        response = requests.get(api_url, headers=headers, timeout=20)
+        if response.status_code != 200:
+            print(f"❌ Failed to fetch data: {response.status_code}")
+            return {"error": "api_error", "message": f"API error: {response.status_code}"}
+    except requests.RequestException as e:
+        print(f"❌ TikTok API request failed: {e}")
+        return {"error": "api_error", "message": f"TikTok API request failed: {str(e)}"}
 
     posts = safe_get(response.json(), ['aweme_list'], [])
     if not posts:

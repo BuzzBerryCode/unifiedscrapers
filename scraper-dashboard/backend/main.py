@@ -99,6 +99,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    PAUSED = "paused"
 
 class JobType(str, Enum):
     NEW_CREATORS = "new_creators"
@@ -188,9 +189,15 @@ def check_running_jobs() -> bool:
         return False
 
 def start_next_queued_job():
-    """Start the next queued job if no jobs are running."""
+    """Start the next queued job if no jobs are running and queue is not paused."""
     try:
         print("🔄 Checking for queued jobs...")
+        
+        # Check if queue is paused
+        if redis_client.get("queue_paused") == "true":
+            print("⏸️ Queue is paused, skipping job start")
+            return
+        
         if check_running_jobs():
             print("⏸️ Already have a running job, skipping")
             return  # Already have a running job
@@ -200,7 +207,7 @@ def start_next_queued_job():
             print("❌ No Supabase client available")
             return
         
-        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running)
+        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running, paused)
         response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
         print(f"📋 Found {len(response.data)} pending/queued jobs")
         
@@ -560,18 +567,101 @@ async def remove_job(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error removing job: {str(e)}")
 
+@app.post("/jobs/pause-queue")
+async def pause_queue(
+    current_user: str = Depends(verify_token)
+):
+    """Pause the job queue by setting all queued jobs to paused status."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Update all queued jobs to paused status
+        response = client.table("scraper_jobs").update({"status": "paused"}).eq("status", "queued").execute()
+        paused_count = len(response.data) if response.data else 0
+        
+        # Store queue pause state in Redis
+        redis_client.set("queue_paused", "true")
+        
+        return {"message": f"Queue paused. {paused_count} jobs moved to paused status."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error pausing queue: {str(e)}")
+
+@app.post("/jobs/resume-queue") 
+async def resume_queue(
+    current_user: str = Depends(verify_token)
+):
+    """Resume the job queue by setting all paused jobs back to queued status."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Update all paused jobs back to queued status
+        response = client.table("scraper_jobs").update({"status": "queued"}).eq("status", "paused").execute()
+        resumed_count = len(response.data) if response.data else 0
+        
+        # Remove queue pause state from Redis
+        redis_client.delete("queue_paused")
+        
+        # Try to start the next job if no jobs are currently running
+        if not check_running_jobs():
+            start_next_queued_job()
+        
+        return {"message": f"Queue resumed. {resumed_count} jobs moved back to queued status."}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error resuming queue: {str(e)}")
+
+@app.get("/jobs/queue-status")
+async def get_queue_status(
+    current_user: str = Depends(verify_token)
+):
+    """Get the current status of the job queue."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if queue is paused
+        is_paused = redis_client.get("queue_paused") == "true"
+        
+        # Get counts of jobs by status
+        running_jobs = client.table("scraper_jobs").select("id", count="exact").eq("status", "running").execute()
+        queued_jobs = client.table("scraper_jobs").select("id", count="exact").eq("status", "queued").execute()
+        paused_jobs = client.table("scraper_jobs").select("id", count="exact").eq("status", "paused").execute()
+        pending_jobs = client.table("scraper_jobs").select("id", count="exact").eq("status", "pending").execute()
+        
+        return {
+            "queue_paused": is_paused,
+            "running_jobs": running_jobs.count,
+            "queued_jobs": queued_jobs.count,
+            "paused_jobs": paused_jobs.count,
+            "pending_jobs": pending_jobs.count,
+            "total_active": running_jobs.count + queued_jobs.count + pending_jobs.count
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting queue status: {str(e)}")
+
 @app.post("/jobs/start-queue")
 async def start_queue(
     current_user: str = Depends(verify_token)
 ):
     """Manually trigger the job queue to start pending jobs."""
     try:
+        # Check if queue is paused
+        if redis_client.get("queue_paused") == "true":
+            raise HTTPException(status_code=400, detail="Queue is paused. Resume queue first.")
+        
         # Force start the next job regardless of running job check
         client = get_supabase_client()
         if not client:
             raise HTTPException(status_code=500, detail="Database connection failed")
         
-        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running)
+        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running, paused)
         response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
         
         if response.data:

@@ -1,7 +1,7 @@
 export interface Job {
   id: string
   job_type: 'new_creators' | 'rescrape_all' | 'rescrape_platform'
-  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'paused'
   description: string
   total_items?: number
   processed_items?: number

@@ -540,6 +540,17 @@ async def remove_job(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error removing job: {str(e)}")
 
+@app.post("/jobs/start-queue")
+async def start_queue(
+    current_user: str = Depends(verify_token)
+):
+    """Manually trigger the job queue to start pending jobs."""
+    try:
+        start_next_queued_job()
+        return {"message": "Job queue processing triggered"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error starting queue: {str(e)}")
+
 @app.post("/jobs/{job_id}/resume")
 async def resume_job(
     job_id: str,

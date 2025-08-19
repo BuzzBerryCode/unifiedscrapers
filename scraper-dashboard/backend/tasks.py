@@ -101,14 +101,33 @@ def process_new_creators(self, job_id: str):
         results = {"added": [], "failed": [], "skipped": [], "filtered": []}
         niche_stats = {"primary_niches": {}, "secondary_niches": {}}
         
+        # Job-level timeout protection (4 hours max)
+        job_start_time = time.time()
+        job_timeout = 4 * 60 * 60  # 4 hours in seconds
+        last_progress_time = job_start_time
+        
         print(f"Processing {total_items} creators")
         
         for i, creator_data in enumerate(csv_data):
             try:
+                # Check job-level timeout
+                current_time = time.time()
+                if current_time - job_start_time > job_timeout:
+                    print(f"🚨 JOB TIMEOUT: Job exceeded {job_timeout/3600:.1f} hour limit")
+                    results["failed"].append(f"Job timeout after {(current_time - job_start_time)/3600:.1f} hours")
+                    break
+                
+                # Check for stuck job (no progress for 10 minutes)
+                if current_time - last_progress_time > 600:  # 10 minutes
+                    print(f"🚨 STUCK JOB DETECTED: No progress for {(current_time - last_progress_time)/60:.1f} minutes")
+                    results["failed"].append(f"Job stuck - no progress for {(current_time - last_progress_time)/60:.1f} minutes")
+                    break
+                
                 username = creator_data['Usernames'].strip()
                 platform = creator_data['Platform'].lower()
                 
                 print(f"Processing {i+1}/{total_items}: @{username} ({platform})")
+                last_progress_time = current_time  # Update progress time
                 
                 # Check if creator already exists
                 existing = supabase.table("creatordata").select("id", "platform", "primary_niche").eq("handle", username).execute()
@@ -224,9 +243,11 @@ def process_new_creators(self, job_id: str):
                 
                 processed_items += 1
                 
-                # Update progress every 5 items and store intermediate results
+                # Update progress every item for better monitoring
+                update_job_progress(job_id, processed_items, failed_items)
+                
+                # Store intermediate results every 5 items
                 if i % 5 == 0:
-                    update_job_progress(job_id, processed_items, failed_items)
                     # Store intermediate results including niche stats
                     intermediate_results = {
                         "added": results["added"].copy(),
@@ -242,6 +263,7 @@ def process_new_creators(self, job_id: str):
                         failed_items=failed_items,
                         results=intermediate_results
                     )
+                    print(f"📊 PROGRESS UPDATE: {processed_items}/{total_items} creators processed ({failed_items} failed)")
                 
             except Exception as e:
                 print(f"Error processing @{username}: {e}")
@@ -396,14 +418,33 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
         failed_items = 0
         results = {"updated": [], "deleted": [], "failed": []}
         
+        # Job-level timeout protection (6 hours max for rescraper)
+        job_start_time = time.time()
+        job_timeout = 6 * 60 * 60  # 6 hours in seconds
+        last_progress_time = job_start_time
+        
         print(f"Rescraping {len(creators)} {platform} creators (starting from {resume_from_index + 1}/{total_items})")
         
         for i, creator in enumerate(creators):
             try:
+                # Check job-level timeout
+                current_time = time.time()
+                if current_time - job_start_time > job_timeout:
+                    print(f"🚨 JOB TIMEOUT: Rescraper exceeded {job_timeout/3600:.1f} hour limit")
+                    results["failed"].append(f"Job timeout after {(current_time - job_start_time)/3600:.1f} hours")
+                    break
+                
+                # Check for stuck job (no progress for 10 minutes)
+                if current_time - last_progress_time > 600:  # 10 minutes
+                    print(f"🚨 STUCK JOB DETECTED: No progress for {(current_time - last_progress_time)/60:.1f} minutes")
+                    results["failed"].append(f"Job stuck - no progress for {(current_time - last_progress_time)/60:.1f} minutes")
+                    break
+                
                 handle = creator.get('handle')
                 current_index = resume_from_index + i
                 
                 print(f"Rescraping {current_index + 1}/{total_items}: @{handle} ({platform})")
+                last_progress_time = current_time  # Update progress time
                 
                 # Add rate limiting between creators
                 if i > 0:  # Don't delay on the first creator

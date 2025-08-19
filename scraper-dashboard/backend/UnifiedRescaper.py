@@ -515,13 +515,39 @@ def scrape_instagram_user_data(username):
     headers = {"x-api-key": SCRAPECREATORS_API_KEY}
     
     print(f"📡 Fetching profile data from API...")
-    try:
-        profile_response = requests.get(profile_url, headers=headers, timeout=30)
-        if profile_response.status_code != 200:
-            print(f"❌ Failed to fetch Instagram profile data for @{username}: {profile_response.text}")
-            return None
-    except requests.RequestException as e:
-        print(f"❌ API request failed for @{username}: {e}")
+    
+    # Add retry logic for API calls
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for @{username}")
+                time.sleep(retry_delay * attempt)  # Exponential backoff
+            
+            profile_response = requests.get(profile_url, headers=headers, timeout=30)
+            
+            if profile_response.status_code == 200:
+                break  # Success
+            elif profile_response.status_code == 429:
+                print(f"⏳ Rate limited for @{username}, waiting {retry_delay * (attempt + 1)} seconds...")
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            elif profile_response.status_code in [500, 502, 503, 504]:
+                print(f"🔄 Server error {profile_response.status_code} for @{username}, retrying...")
+                continue
+            else:
+                print(f"❌ Failed to fetch Instagram profile data for @{username}: {profile_response.status_code} - {profile_response.text}")
+                return None
+                
+        except requests.RequestException as e:
+            print(f"❌ API request failed for @{username} (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                return None
+            continue
+    else:
+        print(f"❌ All {max_retries} attempts failed for @{username}")
         return None
     
     profile_data = profile_response.json().get("data", {}).get("user", {})
@@ -543,12 +569,37 @@ def scrape_instagram_user_data(username):
     posts_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username}"
     
     print(f"📡 Fetching posts data from API...")
-    try:
-        posts_response = requests.get(posts_url, headers=headers, timeout=30)
-        posts_data = posts_response.json().get("items", []) if posts_response.status_code == 200 else []
-    except requests.RequestException as e:
-        print(f"❌ Posts API request failed for @{username}: {e}")
-        posts_data = []
+    posts_data = []
+    
+    # Add retry logic for posts API
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for posts @{username}")
+                time.sleep(retry_delay * attempt)
+            
+            posts_response = requests.get(posts_url, headers=headers, timeout=30)
+            
+            if posts_response.status_code == 200:
+                posts_data = posts_response.json().get("items", [])
+                break
+            elif posts_response.status_code == 429:
+                print(f"⏳ Rate limited for posts @{username}, waiting {retry_delay * (attempt + 1)} seconds...")
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            elif posts_response.status_code in [500, 502, 503, 504]:
+                print(f"🔄 Server error {posts_response.status_code} for posts @{username}, retrying...")
+                continue
+            else:
+                print(f"⚠️ Posts API returned {posts_response.status_code} for @{username}, continuing with empty posts")
+                posts_data = []
+                break
+                
+        except requests.RequestException as e:
+            print(f"❌ Posts API request failed for @{username} (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                posts_data = []
+            continue
 
     print(f"✅ Fetched Instagram profile and {len(posts_data)} posts for @{username}.")
 

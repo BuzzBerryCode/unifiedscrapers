@@ -1,0 +1,289 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  CheckCircleIcon, 
+  XCircleIcon, 
+  ClockIcon, 
+  ExclamationTriangleIcon,
+  TrashIcon,
+  ArrowPathIcon,
+  PlayIcon,
+  PauseIcon
+} from '@heroicons/react/24/outline';
+
+interface JobProgress {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  processed_items: number;
+  total_items: number;
+  failed_items: number;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  results?: {
+    updated?: string[];
+    deleted?: string[];
+    failed?: string[];
+  };
+}
+
+interface JobProgressTrackerProps {
+  job: JobProgress;
+  darkMode: boolean;
+  onResume?: (jobId: string) => void;
+  onCancel?: (jobId: string) => void;
+}
+
+export default function JobProgressTracker({ job, darkMode, onResume, onCancel }: JobProgressTrackerProps) {
+  const [showDetails, setShowDetails] = useState(false);
+  const [errorBreakdown, setErrorBreakdown] = useState<{[key: string]: number}>({});
+
+  // Calculate progress percentage
+  const progressPercentage = job.total_items > 0 ? (job.processed_items / job.total_items) * 100 : 0;
+  const successItems = job.processed_items - job.failed_items;
+
+  // Analyze error patterns
+  useEffect(() => {
+    if (job.results?.failed) {
+      const breakdown: {[key: string]: number} = {};
+      job.results.failed.forEach(error => {
+        const errorType = categorizeError(error);
+        breakdown[errorType] = (breakdown[errorType] || 0) + 1;
+      });
+      setErrorBreakdown(breakdown);
+    }
+  }, [job.results?.failed]);
+
+  const categorizeError = (error: string): string => {
+    const lowerError = error.toLowerCase();
+    if (lowerError.includes('timeout')) return 'Timeout';
+    if (lowerError.includes('rate limit') || lowerError.includes('429')) return 'Rate Limit';
+    if (lowerError.includes('api')) return 'API Error';
+    if (lowerError.includes('database') || lowerError.includes('supabase')) return 'Database';
+    if (lowerError.includes('network') || lowerError.includes('connection')) return 'Network';
+    return 'Unknown';
+  };
+
+  const getStatusIcon = () => {
+    switch (job.status) {
+      case 'running':
+        return <ArrowPathIcon className="h-5 w-5 text-blue-500 animate-spin" />;
+      case 'completed':
+        return <CheckCircleIcon className="h-5 w-5 text-green-500" />;
+      case 'failed':
+        return <XCircleIcon className="h-5 w-5 text-red-500" />;
+      case 'cancelled':
+        return <PauseIcon className="h-5 w-5 text-yellow-500" />;
+      default:
+        return <ClockIcon className="h-5 w-5 text-gray-500" />;
+    }
+  };
+
+  const getStatusColor = () => {
+    switch (job.status) {
+      case 'running': return 'border-blue-500 bg-blue-50 dark:bg-blue-900/20';
+      case 'completed': return 'border-green-500 bg-green-50 dark:bg-green-900/20';
+      case 'failed': return 'border-red-500 bg-red-50 dark:bg-red-900/20';
+      case 'cancelled': return 'border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20';
+      default: return 'border-gray-300 bg-gray-50 dark:bg-gray-800';
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    return new Date(timestamp).toLocaleString();
+  };
+
+  const getErrorTypeColor = (errorType: string) => {
+    const colors: {[key: string]: string} = {
+      'Timeout': 'bg-orange-100 text-orange-800 dark:bg-orange-900/20 dark:text-orange-300',
+      'Rate Limit': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300',
+      'API Error': 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
+      'Database': 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300',
+      'Network': 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300',
+      'Unknown': 'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300'
+    };
+    return colors[errorType] || colors['Unknown'];
+  };
+
+  return (
+    <div className={`border-2 rounded-lg p-4 mb-4 ${getStatusColor()}`}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center space-x-3">
+          {getStatusIcon()}
+          <div>
+            <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              {job.description}
+            </h3>
+            <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+              Started: {formatTime(job.created_at)}
+            </p>
+          </div>
+        </div>
+        
+        <div className="flex items-center space-x-2">
+          {job.status === 'cancelled' && onResume && (
+            <button
+              onClick={() => onResume(job.id)}
+              className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600 flex items-center space-x-1"
+            >
+              <PlayIcon className="h-4 w-4" />
+              <span>Resume</span>
+            </button>
+          )}
+          
+          {job.status === 'running' && onCancel && (
+            <button
+              onClick={() => onCancel(job.id)}
+              className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 flex items-center space-x-1"
+            >
+              <PauseIcon className="h-4 w-4" />
+              <span>Cancel</span>
+            </button>
+          )}
+          
+          <button
+            onClick={() => setShowDetails(!showDetails)}
+            className={`px-3 py-1 rounded text-sm ${
+              darkMode 
+                ? 'bg-gray-700 text-white hover:bg-gray-600' 
+                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+            }`}
+          >
+            {showDetails ? 'Hide' : 'Show'} Details
+          </button>
+        </div>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="mb-3">
+        <div className="flex justify-between text-sm mb-1">
+          <span className={darkMode ? 'text-gray-300' : 'text-gray-600'}>
+            Progress: {job.processed_items}/{job.total_items}
+          </span>
+          <span className={darkMode ? 'text-gray-300' : 'text-gray-600'}>
+            {progressPercentage.toFixed(1)}%
+          </span>
+        </div>
+        
+        <div className={`w-full bg-gray-200 rounded-full h-3 ${darkMode ? 'bg-gray-700' : ''}`}>
+          <div className="relative h-3 rounded-full overflow-hidden">
+            {/* Success portion */}
+            <div 
+              className="absolute left-0 top-0 h-full bg-green-500 transition-all duration-300"
+              style={{ width: `${job.total_items > 0 ? (successItems / job.total_items) * 100 : 0}%` }}
+            ></div>
+            
+            {/* Failed portion */}
+            <div 
+              className="absolute top-0 h-full bg-red-500 transition-all duration-300"
+              style={{ 
+                left: `${job.total_items > 0 ? (successItems / job.total_items) * 100 : 0}%`,
+                width: `${job.total_items > 0 ? (job.failed_items / job.total_items) * 100 : 0}%`
+              }}
+            ></div>
+          </div>
+        </div>
+        
+        <div className="flex justify-between text-xs mt-1">
+          <span className="text-green-600 dark:text-green-400">
+            ✅ {successItems} successful
+          </span>
+          {job.failed_items > 0 && (
+            <span className="text-red-600 dark:text-red-400">
+              ❌ {job.failed_items} failed
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Detailed View */}
+      {showDetails && (
+        <div className="mt-4 space-y-4">
+          {/* Error Breakdown */}
+          {Object.keys(errorBreakdown).length > 0 && (
+            <div>
+              <h4 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                Error Breakdown:
+              </h4>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                {Object.entries(errorBreakdown).map(([errorType, count]) => (
+                  <div
+                    key={errorType}
+                    className={`px-2 py-1 rounded text-xs ${getErrorTypeColor(errorType)}`}
+                  >
+                    {errorType}: {count}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Results Summary */}
+          {job.results && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {job.results.updated && job.results.updated.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-green-600 dark:text-green-400`}>
+                    ✅ Updated ({job.results.updated.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.updated.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.updated.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.updated.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {job.results.deleted && job.results.deleted.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-yellow-600 dark:text-yellow-400`}>
+                    🗑️ Deleted ({job.results.deleted.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.deleted.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.deleted.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.deleted.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {job.results.failed && job.results.failed.length > 0 && (
+                <div>
+                  <h5 className={`font-medium mb-1 text-red-600 dark:text-red-400`}>
+                    ❌ Failed ({job.results.failed.length})
+                  </h5>
+                  <div className="max-h-32 overflow-y-auto">
+                    {job.results.failed.slice(0, 5).map((item, index) => (
+                      <div key={index} className={`text-xs ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {item}
+                      </div>
+                    ))}
+                    {job.results.failed.length > 5 && (
+                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                        ...and {job.results.failed.length - 5} more
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

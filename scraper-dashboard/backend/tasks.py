@@ -293,6 +293,10 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
                 
                 print(f"Rescraping {current_index + 1}/{total_items}: @{handle} ({platform})")
                 
+                # Add rate limiting between creators
+                if i > 0:  # Don't delay on the first creator
+                    time.sleep(1)  # 1 second between creators to avoid rate limits
+                
                 # Add timeout protection to individual creator processing
                 start_time = time.time()
                 try:
@@ -307,14 +311,33 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
                     processing_time = time.time() - start_time
                     print(f"⏰ TIMEOUT: @{handle} processing exceeded 5 minutes ({processing_time:.2f}s)")
                     result = {'status': 'error', 'error': f'Processing timeout after {processing_time:.2f}s'}
+                except Exception as e:
+                    processing_time = time.time() - start_time
+                    print(f"❌ CRITICAL ERROR: @{handle} processing failed after {processing_time:.2f}s: {e}")
+                    result = {'status': 'error', 'error': f'Critical error: {str(e)}'}
                 
                 if result['status'] == 'success':
                     results["updated"].append(f"@{handle}")
+                    print(f"✅ SUCCESS: @{handle} processed successfully")
                 elif result['status'] == 'deleted':
                     results["deleted"].append(f"@{handle} - inactive")
+                    print(f"🗑️ DELETED: @{handle} removed (inactive)")
                 else:
-                    results["failed"].append(f"@{handle} - {result.get('error', 'unknown error')}")
+                    error_msg = result.get('error', 'unknown error')
+                    results["failed"].append(f"@{handle} - {error_msg}")
                     failed_items += 1
+                    
+                    # Categorize errors for better debugging
+                    if 'timeout' in error_msg.lower():
+                        print(f"⏰ TIMEOUT ERROR: @{handle}")
+                    elif 'rate limit' in error_msg.lower() or '429' in error_msg:
+                        print(f"⏳ RATE LIMIT ERROR: @{handle}")
+                    elif 'api' in error_msg.lower():
+                        print(f"🌐 API ERROR: @{handle}")
+                    elif 'database' in error_msg.lower() or 'supabase' in error_msg.lower():
+                        print(f"💾 DATABASE ERROR: @{handle}")
+                    else:
+                        print(f"❌ UNKNOWN ERROR: @{handle} - {error_msg}")
                 
                 processed_items += 1
                 

@@ -21,6 +21,7 @@ import {
 import LoginForm from '@/components/LoginForm'
 import FileUpload from '@/components/FileUpload'
 import JobsTable from '@/components/JobsTable'
+import JobProgressTracker from '@/components/JobProgressTracker'
 
 // Dynamic imports for heavy components to improve initial load
 const CreatorChart = dynamic(() => import('@/components/CreatorChart'), {
@@ -139,6 +140,52 @@ export default function Dashboard() {
     setStats(null)
     toast.success('Logged out successfully')
   }, [])
+
+  const handleResumeJob = useCallback(async (jobId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}/resume`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        toast.success(`Job resumed successfully! Continuing from item ${result.resume_from_index + 1}/${result.total_items}`);
+        fetchData(); // Refresh the job list
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to resume job: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Error resuming job:', error);
+      toast.error('Failed to resume job. Please try again.');
+    }
+  }, [token, fetchData]);
+
+  const handleCancelJob = useCallback(async (jobId: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${jobId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        toast.success('Job cancelled successfully!');
+        fetchData(); // Refresh the job list
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to cancel job: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Error cancelling job:', error);
+      toast.error('Failed to cancel job. Please try again.');
+    }
+  }, [token, fetchData]);
 
   // Memoize expensive computations
   const memoizedJobs = useMemo(() => jobs, [jobs])
@@ -315,7 +362,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-3">
-              <Image 
+        <Image
                 src="/Buzzberry profile picture rounded corners-256x256.png" 
                 alt="BuzzBerry Logo" 
                 width={32} 
@@ -395,6 +442,28 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+
+        {/* Active Jobs Progress - New Section */}
+        {memoizedJobs.filter(job => job.status === 'running' || job.status === 'failed' || job.status === 'cancelled').length > 0 && (
+          <div className="mb-8">
+            <h2 className={`text-lg font-semibold mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              Active & Recent Job Progress
+            </h2>
+            {memoizedJobs
+              .filter(job => job.status === 'running' || job.status === 'failed' || job.status === 'cancelled')
+              .slice(0, 3) // Show only top 3 active jobs
+              .map(job => (
+                <JobProgressTracker 
+                  key={job.id}
+                  job={job}
+                  darkMode={darkMode}
+                  onResume={handleResumeJob}
+                  onCancel={handleCancelJob}
+                />
+              ))
+            }
+          </div>
+        )}
 
         {/* Recent Jobs - Moved up */}
         <div className={`rounded-xl shadow-sm border mb-8 transition-all duration-200 ${

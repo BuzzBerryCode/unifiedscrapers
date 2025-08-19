@@ -29,6 +29,8 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
     switch (status) {
       case 'pending':
         return <ClockIcon className="h-5 w-5 text-yellow-500" />
+      case 'queued':
+        return <ClockIcon className="h-5 w-5 text-blue-400" />
       case 'running':
         return <PlayIcon className="h-5 w-5 text-blue-500" />
       case 'completed':
@@ -48,6 +50,8 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
     switch (status) {
       case 'pending':
         return `${baseClasses} bg-yellow-100 text-yellow-800`
+      case 'queued':
+        return `${baseClasses} bg-blue-100 text-blue-600`
       case 'running':
         return `${baseClasses} bg-blue-100 text-blue-800`
       case 'completed':
@@ -256,7 +260,7 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
                       >
                         <EyeIcon className="h-4 w-4" />
                       </button>
-                      {(job.status === 'pending' || job.status === 'running') && (
+                      {(job.status === 'pending' || job.status === 'running' || job.status === 'queued') && (
                         <button
                           onClick={() => onCancelJob(job.id)}
                           className={`transition-colors ${
@@ -379,6 +383,46 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
               {selectedJob.results && (
                 <div>
                   <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'} mb-2`}>Results</label>
+                  
+                  {/* Niche Statistics for New Creator Jobs */}
+                  {selectedJob.results.niche_stats && (selectedJob.results.niche_stats.primary_niches || selectedJob.results.niche_stats.secondary_niches) && (
+                    <div className={`p-4 rounded-lg mb-3 ${
+                      darkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200'
+                    }`}>
+                      <h4 className={`text-sm font-medium mb-2 ${darkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                        📊 Niche Breakdown
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {selectedJob.results.niche_stats.primary_niches && Object.keys(selectedJob.results.niche_stats.primary_niches).length > 0 && (
+                          <div>
+                            <h5 className={`text-xs font-medium mb-1 ${darkMode ? 'text-blue-400' : 'text-blue-700'}`}>Primary Niches:</h5>
+                            {Object.entries(selectedJob.results.niche_stats.primary_niches)
+                              .sort(([,a], [,b]) => (b as number) - (a as number))
+                              .map(([niche, count]) => (
+                                <div key={niche} className={`text-xs flex justify-between ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                  <span>• {niche}</span>
+                                  <span className="font-medium">{count}</span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                        {selectedJob.results.niche_stats.secondary_niches && Object.keys(selectedJob.results.niche_stats.secondary_niches).length > 0 && (
+                          <div>
+                            <h5 className={`text-xs font-medium mb-1 ${darkMode ? 'text-purple-400' : 'text-purple-700'}`}>Secondary Niches:</h5>
+                            {Object.entries(selectedJob.results.niche_stats.secondary_niches)
+                              .sort(([,a], [,b]) => (b as number) - (a as number))
+                              .map(([niche, count]) => (
+                                <div key={niche} className={`text-xs flex justify-between ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                                  <span>• {niche}</span>
+                                  <span className="font-medium">{count}</span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className={`p-4 rounded-lg space-y-3 ${
                     darkMode ? 'bg-gray-700 border border-gray-600' : 'bg-gray-50'
                   }`}>

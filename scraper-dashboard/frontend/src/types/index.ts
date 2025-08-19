@@ -13,6 +13,10 @@ export interface Job {
     failed?: string[]
     skipped?: string[]
     filtered?: string[]
+    niche_stats?: {
+      primary_niches?: { [key: string]: number }
+      secondary_niches?: { [key: string]: number }
+    }
   }
   error_message?: string
   created_at: string

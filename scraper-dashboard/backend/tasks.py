@@ -99,6 +99,7 @@ def process_new_creators(self, job_id: str):
         processed_items = 0
         failed_items = 0
         results = {"added": [], "failed": [], "skipped": [], "filtered": []}
+        niche_stats = {"primary_niches": {}, "secondary_niches": {}}
         
         print(f"Processing {total_items} creators")
         
@@ -110,9 +111,12 @@ def process_new_creators(self, job_id: str):
                 print(f"Processing {i+1}/{total_items}: @{username} ({platform})")
                 
                 # Check if creator already exists
-                existing = supabase.table("creatordata").select("id").eq("handle", username).execute()
+                existing = supabase.table("creatordata").select("id", "platform", "primary_niche").eq("handle", username).execute()
                 if existing.data:
-                    results["skipped"].append(f"@{username} - already exists")
+                    existing_creator = existing.data[0]
+                    existing_platform = existing_creator.get('platform', 'Unknown')
+                    existing_niche = existing_creator.get('primary_niche', 'Unknown')
+                    results["skipped"].append(f"@{username} - Already exists in database ({existing_platform}, {existing_niche} niche)")
                     processed_items += 1
                     continue
                 
@@ -131,6 +135,16 @@ def process_new_creators(self, job_id: str):
                             # Process media asynchronously
                             asyncio.run(process_creator_media(result['creator_id'], username, result['data']))
                             results["added"].append(f"@{username} (Instagram)")
+                            
+                            # Track niche statistics
+                            if 'data' in result and result['data']:
+                                primary_niche = result['data'].get('primary_niche')
+                                secondary_niche = result['data'].get('secondary_niche')
+                                
+                                if primary_niche:
+                                    niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
+                                if secondary_niche:
+                                    niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
                         else:
                             results["added"].append(f"@{username} (Instagram)")
                     elif result:
@@ -149,6 +163,15 @@ def process_new_creators(self, job_id: str):
                             if creator_id:
                                 asyncio.run(process_creator_media(creator_id, username, influencer_data))
                         results["added"].append(f"@{username} (TikTok)")
+                        
+                        # Track niche statistics
+                        primary_niche = influencer_data.get('primary_niche')
+                        secondary_niche = influencer_data.get('secondary_niche')
+                        
+                        if primary_niche:
+                            niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
+                        if secondary_niche:
+                            niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
                     else:
                         results["failed"].append(f"@{username} - failed to process")
                         failed_items += 1
@@ -178,6 +201,36 @@ def process_new_creators(self, job_id: str):
         redis_client.delete(f"job_data:{job_id}")
         
         print(f"Job {job_id} completed: {len(results['added'])} added, {len(results['failed'])} failed, {len(results['skipped'])} skipped")
+        
+        # Log niche statistics
+        if niche_stats["primary_niches"] or niche_stats["secondary_niches"]:
+            print("\n📊 NICHE BREAKDOWN:")
+            print("Primary Niches:")
+            for niche, count in sorted(niche_stats["primary_niches"].items(), key=lambda x: x[1], reverse=True):
+                print(f"  • {niche}: {count} creators")
+            
+            if niche_stats["secondary_niches"]:
+                print("Secondary Niches:")
+                for niche, count in sorted(niche_stats["secondary_niches"].items(), key=lambda x: x[1], reverse=True):
+                    print(f"  • {niche}: {count} creators")
+        
+        # Add niche stats to results for frontend display
+        results["niche_stats"] = niche_stats
+        
+        update_job_status(
+            job_id,
+            "completed",
+            processed_items=processed_items,
+            failed_items=failed_items,
+            results=results
+        )
+        
+        # Start next queued job
+        try:
+            from main import start_next_queued_job
+            start_next_queued_job()
+        except Exception as e:
+            print(f"Error starting next queued job: {e}")
         
         return {
             "status": "completed",
@@ -247,6 +300,13 @@ def rescrape_all_creators(self, job_id: str):
         )
         
         print(f"Job {job_id} completed: {len(results['updated'])} updated, {len(results['deleted'])} deleted, {len(results['failed'])} failed")
+        
+        # Start next queued job
+        try:
+            from main import start_next_queued_job
+            start_next_queued_job()
+        except Exception as e:
+            print(f"Error starting next queued job: {e}")
         
         return {
             "status": "completed",
@@ -370,6 +430,13 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
         )
         
         print(f"Job {job_id} completed: {len(results['updated'])} updated, {len(results['deleted'])} deleted, {len(results['failed'])} failed")
+        
+        # Start next queued job
+        try:
+            from main import start_next_queued_job
+            start_next_queued_job()
+        except Exception as e:
+            print(f"Error starting next queued job: {e}")
         
         return {
             "status": "completed",

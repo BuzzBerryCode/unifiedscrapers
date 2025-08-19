@@ -94,6 +94,7 @@ from enum import Enum
 
 class JobStatus(str, Enum):
     PENDING = "pending"
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -167,13 +168,68 @@ def init_job_table():
         # Table doesn't exist, we'll create it via SQL
         print("Jobs table needs to be created in Supabase")
 
+def check_running_jobs() -> bool:
+    """Check if there are any currently running jobs."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            return False
+        
+        response = client.table("scraper_jobs").select("id").eq("status", "running").execute()
+        return len(response.data) > 0
+    except Exception as e:
+        print(f"Error checking running jobs: {e}")
+        return False
+
+def start_next_queued_job():
+    """Start the next queued job if no jobs are running."""
+    try:
+        if check_running_jobs():
+            return  # Already have a running job
+        
+        client = get_supabase_client()
+        if not client:
+            return
+        
+        # Get the oldest queued job
+        response = client.table("scraper_jobs").select("*").eq("status", "queued").order("created_at").limit(1).execute()
+        
+        if response.data:
+            job = response.data[0]
+            job_id = job["id"]
+            
+            # Update status to running
+            client.table("scraper_jobs").update({"status": "running", "updated_at": datetime.utcnow().isoformat()}).eq("id", job_id).execute()
+            
+            # Start the appropriate Celery task
+            celery = get_celery_app()
+            if celery:
+                if job["job_type"] == "new_creators":
+                    celery.send_task("tasks.process_new_creators", args=[job_id])
+                elif job["job_type"] == "rescrape_platform":
+                    # Extract platform from description or default to Instagram
+                    platform = "Instagram"
+                    if "TikTok" in job.get("description", ""):
+                        platform = "TikTok"
+                    celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform])
+                
+                print(f"Started queued job: {job_id}")
+    
+    except Exception as e:
+        print(f"Error starting next queued job: {e}")
+
 def create_job(job_type: str, description: str = "", total_items: int = 0) -> str:
-    """Create a new job in the database."""
+    """Create a new job in the database with proper queuing."""
     job_id = str(uuid.uuid4())
+    
+    # Check if there are running jobs to determine initial status
+    has_running_jobs = check_running_jobs()
+    initial_status = JobStatus.QUEUED if has_running_jobs else JobStatus.PENDING
+    
     job_data = {
         "id": job_id,
         "job_type": job_type,
-        "status": JobStatus.PENDING,
+        "status": initial_status,
         "description": description,
         "total_items": total_items,
         "processed_items": 0,
@@ -186,6 +242,11 @@ def create_job(job_type: str, description: str = "", total_items: int = 0) -> st
         client = get_supabase_client()
         if client:
             client.table("scraper_jobs").insert(job_data).execute()
+            
+            # If no running jobs, start this one immediately
+            if not has_running_jobs:
+                start_next_queued_job()
+                
         return job_id
     except Exception as e:
         print(f"Error creating job: {e}")

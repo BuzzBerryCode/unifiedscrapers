@@ -526,7 +526,7 @@ def scrape_instagram_user_data(username):
                 print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for @{username}")
                 time.sleep(retry_delay * attempt)  # Exponential backoff
             
-            profile_response = requests.get(profile_url, headers=headers, timeout=30)
+            profile_response = requests.get(profile_url, headers=headers, timeout=20)
             
             if profile_response.status_code == 200:
                 break  # Success
@@ -578,7 +578,7 @@ def scrape_instagram_user_data(username):
                 print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for posts @{username}")
                 time.sleep(retry_delay * attempt)
             
-            posts_response = requests.get(posts_url, headers=headers, timeout=30)
+            posts_response = requests.get(posts_url, headers=headers, timeout=20)
             
             if posts_response.status_code == 200:
                 posts_data = posts_response.json().get("items", [])

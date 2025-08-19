@@ -40,8 +40,7 @@ celery_app.conf.update(
     timezone='UTC',
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=3600,  # 1 hour timeout
-    task_soft_time_limit=3300,  # 55 minutes soft timeout
+
     worker_prefetch_multiplier=1,
     task_acks_late=True,
     worker_disable_rate_limits=False,
@@ -304,12 +303,12 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
                     result = asyncio.run(
                         asyncio.wait_for(
                             rescrape_and_update_creator(creator), 
-                            timeout=300  # 5 minute timeout per creator
+                            timeout=180  # Reduced to 3 minute timeout per creator
                         )
                     )
                 except asyncio.TimeoutError:
                     processing_time = time.time() - start_time
-                    print(f"⏰ TIMEOUT: @{handle} processing exceeded 5 minutes ({processing_time:.2f}s)")
+                    print(f"⏰ TIMEOUT: @{handle} processing exceeded 3 minutes ({processing_time:.2f}s)")
                     result = {'status': 'error', 'error': f'Processing timeout after {processing_time:.2f}s'}
                 except Exception as e:
                     processing_time = time.time() - start_time
@@ -341,9 +340,19 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
                 
                 processed_items += 1
                 
-                # Update progress every 5 items (more frequent updates)
-                if i % 5 == 0:
-                    update_job_progress(job_id, processed_items, failed_items)
+                # Update progress every item and checkpoint every 10
+                update_job_progress(job_id, processed_items, failed_items)
+                
+                if i % 10 == 0:
+                    print(f"📊 CHECKPOINT: Processed {processed_items}/{total_items} creators ({failed_items} failed)")
+                    # Force database update for checkpoint
+                    update_job_status(
+                        job_id,
+                        "running",
+                        processed_items=processed_items,
+                        failed_items=failed_items,
+                        results=results
+                    )
                 
             except Exception as e:
                 print(f"❌ Critical error rescraping @{creator.get('handle', 'unknown')}: {e}")

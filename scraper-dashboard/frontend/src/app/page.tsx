@@ -178,6 +178,28 @@ export default function Dashboard() {
     }
   }, [token, fetchData]);
 
+  const handleRemoveJob = useCallback(async (jobId: string) => {
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}/remove`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        toast.success('Job removed successfully!');
+        fetchData(); // Refresh the job list
+      } else {
+        const error = await response.json();
+        toast.error(`Failed to remove job: ${error.detail}`);
+      }
+    } catch (error) {
+      console.error('Error removing job:', error);
+      toast.error('Failed to remove job. Please try again.');
+    }
+  }, [token, fetchData]);
+
   // Memoize expensive computations
   const memoizedJobs = useMemo(() => jobs, [jobs])
   const memoizedStats = useMemo(() => stats, [stats])
@@ -449,7 +471,7 @@ export default function Dashboard() {
               Recent Jobs
             </h2>
           </div>
-          <JobsTable jobs={memoizedJobs} onCancelJob={handleCancelJob} darkMode={darkMode} />
+          <JobsTable jobs={memoizedJobs} onCancelJob={handleCancelJob} onRemoveJob={handleRemoveJob} darkMode={darkMode} />
         </div>
 
         {/* Creator Activity Chart - Moved under Recent Jobs */}

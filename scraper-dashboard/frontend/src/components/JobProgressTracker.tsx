@@ -185,6 +185,33 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
       {/* Detailed View */}
       {showDetails && (
         <div className="mt-4 space-y-4">
+          {/* Job Information */}
+          <div>
+            <h4 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+              Job Information:
+            </h4>
+            <div className="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Status:</span>
+                <span className={`ml-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{job.status}</span>
+              </div>
+              <div>
+                <span className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Progress:</span>
+                <span className={`ml-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{processedItems}/{totalItems}</span>
+              </div>
+              <div>
+                <span className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Success Rate:</span>
+                <span className={`ml-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  {totalItems > 0 ? ((successItems / processedItems) * 100).toFixed(1) : 0}%
+                </span>
+              </div>
+              <div>
+                <span className={`font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Created:</span>
+                <span className={`ml-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>{formatTime(job.created_at)}</span>
+              </div>
+            </div>
+          </div>
+
           {/* Error Breakdown */}
           {Object.keys(errorBreakdown).length > 0 && (
             <div>

@@ -17,10 +17,11 @@ import { Job } from '@/types'
 interface JobsTableProps {
   jobs: Job[]
   onCancelJob: (jobId: string) => Promise<void>
+  onRemoveJob?: (jobId: string) => Promise<void>
   darkMode?: boolean
 }
 
-export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsTableProps) {
+export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = false }: JobsTableProps) {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [showDetails, setShowDetails] = useState(false)
 
@@ -263,6 +264,20 @@ export default function JobsTable({ jobs, onCancelJob, darkMode = false }: JobsT
                               ? 'text-red-400 hover:text-red-300' 
                               : 'text-red-600 hover:text-red-900'
                           }`}
+                          title="Cancel Job"
+                        >
+                          <PauseIcon className="h-4 w-4" />
+                        </button>
+                      )}
+                      {(job.status === 'cancelled' || job.status === 'failed' || job.status === 'completed') && onRemoveJob && (
+                        <button
+                          onClick={() => onRemoveJob(job.id)}
+                          className={`transition-colors ${
+                            darkMode 
+                              ? 'text-red-400 hover:text-red-300' 
+                              : 'text-red-600 hover:text-red-900'
+                          }`}
+                          title="Remove Job"
                         >
                           <TrashIcon className="h-4 w-4" />
                         </button>

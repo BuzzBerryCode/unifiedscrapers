@@ -454,6 +454,33 @@ async def cancel_job(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error cancelling job: {str(e)}")
 
+@app.delete("/jobs/{job_id}/remove")
+async def remove_job(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Permanently remove a job from the database."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if job exists and is not running
+        job_response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        if job["status"] == "running":
+            raise HTTPException(status_code=400, detail="Cannot remove a running job. Cancel it first.")
+        
+        # Delete the job from database
+        client.table("scraper_jobs").delete().eq("id", job_id).execute()
+        
+        return {"message": "Job removed successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error removing job: {str(e)}")
+
 @app.post("/jobs/{job_id}/resume")
 async def resume_job(
     job_id: str,

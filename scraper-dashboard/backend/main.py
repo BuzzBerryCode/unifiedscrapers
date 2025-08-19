@@ -191,8 +191,8 @@ def start_next_queued_job():
         if not client:
             return
         
-        # Get the oldest queued job
-        response = client.table("scraper_jobs").select("*").eq("status", "queued").order("created_at").limit(1).execute()
+        # Get the oldest pending or queued job
+        response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
         
         if response.data:
             job = response.data[0]

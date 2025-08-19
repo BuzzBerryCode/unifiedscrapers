@@ -560,8 +560,38 @@ async def start_queue(
 ):
     """Manually trigger the job queue to start pending jobs."""
     try:
-        start_next_queued_job()
-        return {"message": "Job queue processing triggered"}
+        # Force start the next job regardless of running job check
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get the oldest pending or queued job
+        response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
+        
+        if response.data:
+            job = response.data[0]
+            job_id = job["id"]
+            
+            # Update status to running
+            client.table("scraper_jobs").update({"status": "running", "updated_at": datetime.utcnow().isoformat()}).eq("id", job_id).execute()
+            
+            # Start the appropriate Celery task
+            celery = get_celery_app()
+            if celery:
+                if job["job_type"] == "new_creators":
+                    celery.send_task("tasks.process_new_creators", args=[job_id])
+                elif job["job_type"] == "rescrape_platform":
+                    platform = "Instagram"
+                    if "TikTok" in job.get("description", ""):
+                        platform = "TikTok"
+                    celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform])
+                
+                return {"message": f"Started job {job_id} ({job['job_type']})"}
+            else:
+                raise HTTPException(status_code=500, detail="Celery not available")
+        else:
+            return {"message": "No pending jobs found"}
+            
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error starting queue: {str(e)}")
 

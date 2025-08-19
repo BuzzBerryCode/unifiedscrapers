@@ -56,7 +56,9 @@ export default function CreatorChart({ jobs, darkMode }: CreatorChartProps) {
     
     // Process completed jobs
     jobs.filter(job => job.status === 'completed').forEach(job => {
-      const jobDate = new Date(job.created_at).toISOString().split('T')[0]
+      // Use updated_at (completion date) for rescrape jobs, created_at for new creator jobs
+      const dateToUse = job.job_type.includes('rescrape') ? job.updated_at : job.created_at
+      const jobDate = new Date(dateToUse).toISOString().split('T')[0]
       const dayData = dailyMap.get(jobDate)
       
       if (dayData && job.results) {

@@ -173,12 +173,18 @@ def check_running_jobs() -> bool:
     try:
         client = get_supabase_client()
         if not client:
+            print("❌ No Supabase client for running job check")
             return False
         
-        response = client.table("scraper_jobs").select("id").eq("status", "running").execute()
-        return len(response.data) > 0
+        response = client.table("scraper_jobs").select("id,job_type").eq("status", "running").execute()
+        running_count = len(response.data)
+        print(f"🔍 Found {running_count} running jobs")
+        if running_count > 0:
+            for job in response.data:
+                print(f"   - Running: {job['id']} ({job['job_type']})")
+        return running_count > 0
     except Exception as e:
-        print(f"Error checking running jobs: {e}")
+        print(f"❌ Error checking running jobs: {e}")
         return False
 
 def start_next_queued_job():
@@ -194,7 +200,7 @@ def start_next_queued_job():
             print("❌ No Supabase client available")
             return
         
-        # Get the oldest pending or queued job
+        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running)
         response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
         print(f"📋 Found {len(response.data)} pending/queued jobs")
         
@@ -565,7 +571,7 @@ async def start_queue(
         if not client:
             raise HTTPException(status_code=500, detail="Database connection failed")
         
-        # Get the oldest pending or queued job
+        # Get the oldest pending or queued job (exclude completed, cancelled, failed, running)
         response = client.table("scraper_jobs").select("*").in_("status", ["pending", "queued"]).order("created_at").limit(1).execute()
         
         if response.data:

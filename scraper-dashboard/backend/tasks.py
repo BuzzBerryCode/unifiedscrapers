@@ -351,16 +351,16 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
                 # Add timeout protection to individual creator processing
                 start_time = time.time()
                 try:
-                    # Use asyncio.wait_for to add timeout protection
+                    # Use asyncio.wait_for with more aggressive timeout
                     result = asyncio.run(
                         asyncio.wait_for(
                             rescrape_and_update_creator(creator), 
-                            timeout=180  # Reduced to 3 minute timeout per creator
+                            timeout=120  # Reduced to 2 minute timeout per creator
                         )
                     )
                 except asyncio.TimeoutError:
                     processing_time = time.time() - start_time
-                    print(f"⏰ TIMEOUT: @{handle} processing exceeded 3 minutes ({processing_time:.2f}s)")
+                    print(f"⏰ TIMEOUT: @{handle} processing exceeded 2 minutes ({processing_time:.2f}s)")
                     result = {'status': 'error', 'error': f'Processing timeout after {processing_time:.2f}s'}
                 except Exception as e:
                     processing_time = time.time() - start_time

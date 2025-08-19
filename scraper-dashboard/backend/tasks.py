@@ -188,15 +188,6 @@ def process_new_creators(self, job_id: str):
                 failed_items += 1
                 processed_items += 1
         
-        # Final update
-        update_job_status(
-            job_id, 
-            "completed",
-            processed_items=processed_items,
-            failed_items=failed_items,
-            results=results
-        )
-        
         # Clean up Redis data
         redis_client.delete(f"job_data:{job_id}")
         
@@ -217,6 +208,7 @@ def process_new_creators(self, job_id: str):
         # Add niche stats to results for frontend display
         results["niche_stats"] = niche_stats
         
+        # Final job completion update
         update_job_status(
             job_id,
             "completed",

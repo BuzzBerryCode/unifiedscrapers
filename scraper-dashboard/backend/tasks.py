@@ -83,10 +83,13 @@ def update_job_progress(job_id: str, processed_items: int, failed_items: int = 0
 # ==================== CELERY TASKS ====================
 
 @celery_app.task(bind=True)
-def process_new_creators(self, job_id: str):
-    """Process new creators from CSV data."""
+def process_new_creators(self, job_id: str, resume_from_index: int = 0):
+    """Process new creators from CSV data with resume functionality."""
     try:
         print(f"Starting job {job_id}: process_new_creators")
+        if resume_from_index > 0:
+            print(f"🔄 RESUMING from index {resume_from_index}")
+        
         update_job_status(job_id, "running")
         
         # Get CSV data from Redis
@@ -96,7 +99,13 @@ def process_new_creators(self, job_id: str):
         
         csv_data = json.loads(csv_data_json)
         total_items = len(csv_data)
-        processed_items = 0
+        
+        # Resume from specific index if provided
+        if resume_from_index > 0:
+            csv_data = csv_data[resume_from_index:]
+            print(f"📋 Resuming from creator {resume_from_index + 1}/{total_items}")
+        
+        processed_items = resume_from_index  # Start from resume point
         failed_items = 0
         results = {"added": [], "failed": [], "skipped": [], "filtered": []}
         niche_stats = {"primary_niches": {}, "secondary_niches": {}}
@@ -106,7 +115,7 @@ def process_new_creators(self, job_id: str):
         job_timeout = 4 * 60 * 60  # 4 hours in seconds
         last_progress_time = job_start_time
         
-        print(f"Processing {total_items} creators")
+        print(f"Processing {len(csv_data)} creators (starting from {resume_from_index + 1}/{total_items})")
         
         for i, creator_data in enumerate(csv_data):
             try:
@@ -125,8 +134,9 @@ def process_new_creators(self, job_id: str):
                 
                 username = creator_data['Usernames'].strip()
                 platform = creator_data['Platform'].lower()
+                current_index = resume_from_index + i
                 
-                print(f"Processing {i+1}/{total_items}: @{username} ({platform})")
+                print(f"Processing {current_index + 1}/{total_items}: @{username} ({platform})")
                 last_progress_time = current_time  # Update progress time
                 
                 # Check if creator already exists

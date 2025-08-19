@@ -639,8 +639,12 @@ async def resume_job(
                     platform = "TikTok"
                 
                 celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform, resume_from_index])
+            elif job["job_type"] == "new_creators":
+                # Resume new creators job from where it left off
+                celery.send_task("tasks.process_new_creators", args=[job_id, resume_from_index])
+                print(f"🔄 Resumed new_creators job {job_id} from index {resume_from_index}")
             else:
-                raise HTTPException(status_code=400, detail="Resume not supported for this job type yet")
+                raise HTTPException(status_code=400, detail=f"Resume not supported for job type: {job['job_type']}")
         
         return {
             "message": f"Job {job_id} resumed from index {resume_from_index}",
@@ -650,6 +654,55 @@ async def resume_job(
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error resuming job: {str(e)}")
+
+@app.post("/jobs/{job_id}/force-continue")
+async def force_continue_job(
+    job_id: str,
+    current_user: str = Depends(verify_token)
+):
+    """Force continue a stuck running job by restarting it."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get the job details
+        job_response = client.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        
+        # Only allow for running jobs
+        if job["status"] != "running":
+            raise HTTPException(status_code=400, detail=f"Job is not running (current status: {job['status']})")
+        
+        # Get current progress to resume from
+        resume_from_index = job.get("processed_items", 0)
+        
+        # Force restart the job from current position
+        celery = get_celery_app()
+        if celery:
+            if job["job_type"] == "new_creators":
+                celery.send_task("tasks.process_new_creators", args=[job_id, resume_from_index])
+                print(f"🔄 Force continued new_creators job {job_id} from index {resume_from_index}")
+            elif job["job_type"] == "rescrape_platform":
+                platform = "Instagram"
+                if "TikTok" in job.get("description", ""):
+                    platform = "TikTok"
+                celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform, resume_from_index])
+                print(f"🔄 Force continued rescrape job {job_id} from index {resume_from_index}")
+            else:
+                raise HTTPException(status_code=400, detail=f"Force continue not supported for job type: {job['job_type']}")
+        
+        return {
+            "message": f"Job {job_id} force continued from index {resume_from_index}",
+            "resume_from_index": resume_from_index,
+            "total_items": job.get("total_items", 0)
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error force continuing job: {str(e)}")
 
 @app.post("/jobs/{job_id}/trigger")
 async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):

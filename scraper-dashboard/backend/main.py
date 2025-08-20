@@ -897,7 +897,13 @@ async def direct_restart_job(
 async def force_start_pending_job(
     current_user: str = Depends(verify_token)
 ):
-    """Force start the pending job from position 380."""
+    """Force start the pending job from position 380 using direct execution."""
+    import threading
+    import asyncio
+    import json
+    import time
+    from datetime import datetime
+    
     try:
         client = get_supabase_client()
         if not client:
@@ -914,38 +920,161 @@ async def force_start_pending_job(
             "updated_at": datetime.utcnow().isoformat()
         }).eq("id", job_id).execute()
         
-        # Try Celery first, then fallback to direct execution
-        celery = get_celery_app()
-        if celery:
-            try:
-                celery.send_task("tasks.process_new_creators", args=[job_id, resume_from_index])
-                return {
-                    "message": f"Job {job_id} started via Celery from position {resume_from_index}",
-                    "method": "celery",
-                    "resume_from_index": resume_from_index,
-                    "remaining_items": 507 - resume_from_index
-                }
-            except Exception as e:
-                print(f"Celery failed, trying direct execution: {e}")
-        
-        # Fallback to direct execution
-        import threading
-        import asyncio
-        
+        # Run job directly in background thread (bypassing problematic Celery)
         def run_job_directly():
             try:
-                # Create a new event loop for this thread
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                print(f"🚀 Starting direct job execution for {job_id}")
                 
-                # Import and run the task function directly
-                from tasks import process_new_creators
-                task_instance = process_new_creators()
-                task_instance.apply(args=[job_id, resume_from_index])
+                # Get CSV data from Redis
+                redis_client = get_redis_client()
+                if not redis_client:
+                    raise Exception("Redis connection failed")
                 
-                loop.close()
+                csv_data_json = redis_client.get(f"job_data:{job_id}")
+                if not csv_data_json:
+                    raise Exception("CSV data not found in Redis")
+                
+                csv_data = json.loads(csv_data_json)
+                
+                # Resume from specific index
+                if resume_from_index > 0:
+                    csv_data = csv_data[resume_from_index:]
+                
+                # Import scraper functions
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                from UnifiedScraper import process_instagram_user, process_tiktok_account
+                
+                # Initialize tracking
+                total_items = len(csv_data) + resume_from_index
+                processed_items = resume_from_index
+                failed_items = 0
+                results = {"added": [], "failed": [], "skipped": [], "filtered": []}
+                niche_stats = {"primary_niches": {}, "secondary_niches": {}}
+                
+                # Process creators
+                for i, creator_data in enumerate(csv_data):
+                    username = creator_data['Usernames'].strip()
+                    platform = creator_data['Platform'].lower()
+                    current_index = resume_from_index + i
+                    
+                    print(f"Processing {current_index + 1}/{total_items}: @{username} ({platform})")
+                    
+                    # Check if already exists
+                    existing = client.table("creatordata").select("id", "platform", "primary_niche").eq("handle", username).execute()
+                    if existing.data:
+                        existing_creator = existing.data[0]
+                        existing_platform = existing_creator.get('platform', 'Unknown')
+                        existing_niche = existing_creator.get('primary_niche', 'Unknown')
+                        results["skipped"].append(f"@{username} - Already exists in database ({existing_platform}, {existing_niche} niche)")
+                        processed_items += 1
+                        continue
+                    
+                    # Process creator with timeout
+                    try:
+                        if platform == 'instagram':
+                            result = asyncio.run(
+                                asyncio.wait_for(
+                                    asyncio.to_thread(process_instagram_user, username),
+                                    timeout=300  # 5 minute timeout per creator
+                                )
+                            )
+                        elif platform == 'tiktok':
+                            result = asyncio.run(
+                                asyncio.wait_for(
+                                    asyncio.to_thread(process_tiktok_account, username, "wjhGgI14NjNMUuXA92YWXjojozF2"),
+                                    timeout=300
+                                )
+                            )
+                        else:
+                            results["failed"].append(f"@{username} - Unknown platform: {platform}")
+                            failed_items += 1
+                            processed_items += 1
+                            continue
+                        
+                        # Process result
+                        if result and isinstance(result, dict):
+                            if result.get("error") == "filtered":
+                                results["filtered"].append(f"@{username} - {result.get('message', 'Filtered')}")
+                            elif result.get("error") == "api_error":
+                                results["failed"].append(f"@{username} - {result.get('message', 'API Error')}")
+                                failed_items += 1
+                            elif 'data' in result and result['data']:
+                                results["added"].append(f"@{username}")
+                                # Track niche stats
+                                primary_niche = result['data'].get('primary_niche')
+                                secondary_niche = result['data'].get('secondary_niche')
+                                if primary_niche:
+                                    niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
+                                if secondary_niche:
+                                    niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
+                            else:
+                                results["failed"].append(f"@{username} - Processing failed")
+                                failed_items += 1
+                        else:
+                            results["failed"].append(f"@{username} - No result returned")
+                            failed_items += 1
+                        
+                    except asyncio.TimeoutError:
+                        print(f"⏰ Timeout processing @{username}")
+                        results["failed"].append(f"@{username} - Timeout (5 minutes)")
+                        failed_items += 1
+                    except Exception as e:
+                        print(f"❌ Error processing @{username}: {e}")
+                        results["failed"].append(f"@{username} - Error: {str(e)}")
+                        failed_items += 1
+                    
+                    processed_items += 1
+                    
+                    # Update progress every item
+                    client.table("scraper_jobs").update({
+                        "processed_items": processed_items,
+                        "failed_items": failed_items,
+                        "updated_at": datetime.utcnow().isoformat()
+                    }).eq("id", job_id).execute()
+                    
+                    # Store intermediate results every 5 items
+                    if i % 5 == 0:
+                        intermediate_results = {
+                            "added": results["added"].copy(),
+                            "failed": results["failed"].copy(),
+                            "skipped": results["skipped"].copy(),
+                            "filtered": results["filtered"].copy(),
+                            "niche_stats": niche_stats.copy()
+                        }
+                        client.table("scraper_jobs").update({
+                            "status": "running",
+                            "processed_items": processed_items,
+                            "failed_items": failed_items,
+                            "results": intermediate_results,
+                            "updated_at": datetime.utcnow().isoformat()
+                        }).eq("id", job_id).execute()
+                        print(f"📊 CHECKPOINT: {processed_items}/{total_items} creators processed")
+                    
+                    # Rate limiting - intelligent delays
+                    if result and isinstance(result, dict) and result.get("error") == "api_error":
+                        time.sleep(2)  # Longer delay after API errors
+                    else:
+                        time.sleep(0.5)  # Shorter delay for successful calls
+                
+                # Final update
+                results["niche_stats"] = niche_stats
+                client.table("scraper_jobs").update({
+                    "status": "completed",
+                    "processed_items": processed_items,
+                    "failed_items": failed_items,
+                    "results": results,
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", job_id).execute()
+                
+                print(f"🎉 Job {job_id} completed successfully!")
+                print(f"   Added: {len(results['added'])}")
+                print(f"   Skipped: {len(results['skipped'])}")
+                print(f"   Filtered: {len(results['filtered'])}")
+                print(f"   Failed: {len(results['failed'])}")
+                
             except Exception as e:
                 print(f"❌ Direct job execution failed: {e}")
+                traceback.print_exc()
                 # Update job status to failed
                 try:
                     client.table("scraper_jobs").update({
@@ -961,10 +1090,11 @@ async def force_start_pending_job(
         thread.start()
         
         return {
-            "message": f"Job {job_id} started directly from position {resume_from_index}",
-            "method": "direct",
+            "message": f"Job {job_id} started directly from position {resume_from_index} (bypassing Celery)",
+            "method": "direct_execution",
             "resume_from_index": resume_from_index,
-            "remaining_items": 507 - resume_from_index
+            "remaining_items": 507 - resume_from_index,
+            "note": "Job is running in background thread on server"
         }
     
     except Exception as e:

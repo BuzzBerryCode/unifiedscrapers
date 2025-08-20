@@ -15,6 +15,8 @@ from celery import Celery
 from supabase import create_client, Client
 import jwt
 from passlib.context import CryptContext
+import sys
+import traceback
 
 # ==================== CONFIGURATION ====================
 

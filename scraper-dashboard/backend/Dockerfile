@@ -25,4 +25,4 @@ COPY . .
 EXPOSE 8000
 
 # Command to run the application
-CMD ["python", "entrypoint.py"]
+CMD ["python3", "start.py"]

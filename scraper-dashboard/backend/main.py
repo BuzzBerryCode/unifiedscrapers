@@ -106,20 +106,26 @@ def start_job_directly(job_id: str, job_type: str):
         print(f"🚀 Starting job {job_id} directly (type: {job_type})")
         
         # Import tasks here to avoid circular imports
-        if job_type == "new_creators":
-            from tasks import process_new_creators
-            process_new_creators(job_id)
-        elif job_type == "rescrape_instagram":
-            from tasks import rescrape_platform_creators
-            rescrape_platform_creators(job_id, "instagram")
-        elif job_type == "rescrape_tiktok":
-            from tasks import rescrape_platform_creators
-            rescrape_platform_creators(job_id, "tiktok")
-        elif job_type == "rescrape_all":
-            from tasks import rescrape_all_creators
-            rescrape_all_creators(job_id)
-        else:
-            print(f"❌ Unknown job type: {job_type}")
+        try:
+            if job_type == "new_creators":
+                from tasks import process_new_creators
+                process_new_creators(job_id)
+            elif job_type == "rescrape_instagram":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "instagram")
+            elif job_type == "rescrape_tiktok":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "tiktok")
+            elif job_type == "rescrape_all":
+                from tasks import rescrape_all_creators
+                rescrape_all_creators(job_id)
+            else:
+                print(f"❌ Unknown job type: {job_type}")
+                return
+                
+        except ImportError as import_error:
+            print(f"❌ Failed to import tasks module: {import_error}")
+            raise Exception(f"Tasks module import failed: {import_error}")
             
     except Exception as e:
         print(f"❌ Job {job_id} failed: {e}")
@@ -207,15 +213,25 @@ def job_monitor():
         try:
             start_next_queued_job()
             time.sleep(10)  # Check every 10 seconds
+        except KeyboardInterrupt:
+            print("🛑 Job monitor shutting down...")
+            break
         except Exception as e:
             print(f"❌ Job monitor error: {e}")
+            traceback.print_exc()
             time.sleep(30)  # Wait longer on error
 
 # ==================== API ENDPOINTS ====================
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.utcnow().isoformat(),
+        "redis_connected": bool(get_redis_client()),
+        "supabase_connected": bool(get_supabase_client()),
+        "python_version": sys.version
+    }
 
 @app.post("/auth/login")
 async def login(credentials: dict):
@@ -332,22 +348,35 @@ async def upload_csv(
 
 @app.on_event("startup")
 async def startup_event():
-    print("🚀 Scraper Dashboard API starting up...")
-    print(f"📊 Supabase URL: {SUPABASE_URL}")
-    print(f"🔗 Redis URL: {REDIS_URL}")
-    print(f"🌐 Port: {os.getenv('PORT', '8000')}")
-    
-    # Test connections
-    get_supabase_client()
-    get_redis_client()
-    
-    # Start background job monitor
-    monitor_thread = threading.Thread(target=job_monitor)
-    monitor_thread.daemon = True
-    monitor_thread.start()
-    print("✅ Background job monitor started")
-    
-    print("✅ Scraper Dashboard API started")
+    try:
+        print("🚀 Scraper Dashboard API starting up...")
+        print(f"📊 Supabase URL: {SUPABASE_URL}")
+        print(f"🔗 Redis URL: {REDIS_URL}")
+        print(f"🌐 Port: {os.getenv('PORT', '8000')}")
+        
+        # Test connections
+        supabase_ok = get_supabase_client() is not None
+        redis_ok = get_redis_client() is not None
+        
+        print(f"📊 Supabase connection: {'✅' if supabase_ok else '❌'}")
+        print(f"🔗 Redis connection: {'✅' if redis_ok else '❌'}")
+        
+        # Start background job monitor
+        try:
+            monitor_thread = threading.Thread(target=job_monitor)
+            monitor_thread.daemon = True
+            monitor_thread.start()
+            print("✅ Background job monitor started")
+        except Exception as monitor_error:
+            print(f"⚠️ Background job monitor failed to start: {monitor_error}")
+            # Don't fail startup if monitor fails
+        
+        print("✅ Scraper Dashboard API started")
+        
+    except Exception as e:
+        print(f"❌ Startup error: {e}")
+        traceback.print_exc()
+        # Don't raise the exception to prevent shutdown
 
 if __name__ == "__main__":
     import uvicorn

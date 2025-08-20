@@ -14,6 +14,8 @@ import pillow_heif
 from PIL import Image
 import io
 from typing import Optional
+import json
+import time
 
 # ==============================================================================
 # --- INITIALIZATION ---
@@ -437,23 +439,67 @@ def process_instagram_user(username_input):
     profile_url = f"https://api.scrapecreators.com/v1/instagram/profile?handle={username_input}"
     headers = {"x-api-key": SCRAPECREATORS_API_KEY}
     
-    try:
-        response = requests.get(profile_url, headers=headers, timeout=20)
-        if response.status_code != 200:
-            print(f"❌ Failed to fetch profile data: {response.status_code}")
-            return {"error": "api_error", "message": f"API error: {response.status_code}"}
-    except requests.RequestException as e:
-        print(f"❌ Profile API request failed: {e}")
-        return {"error": "api_error", "message": f"Profile API request failed: {str(e)}"}
+    # Add retry logic with exponential backoff for API calls
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+                print(f"   🔄 Retry {attempt + 1}/{max_retries} for @{username_input} after {wait_time}s...")
+                time.sleep(wait_time)
+            
+            response = requests.get(profile_url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                break  # Success
+            elif response.status_code == 429:
+                print(f"⏳ Rate limited for @{username_input}, waiting longer...")
+                time.sleep(60)  # Wait 1 minute for rate limits
+                continue
+            elif response.status_code in [500, 502, 503, 504, 520]:
+                print(f"🔄 Server error {response.status_code} for @{username_input}, retrying...")
+                continue
+            else:
+                print(f"❌ Failed to fetch profile data: {response.status_code}")
+                return {"error": "api_error", "message": f"API error: {response.status_code}"}
+                
+        except requests.RequestException as e:
+            print(f"❌ Profile API request failed (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                return {"error": "api_error", "message": f"Profile API request failed after {max_retries} attempts: {str(e)}"}
+            continue
+    else:
+        print(f"❌ All {max_retries} attempts failed for @{username_input}")
+        return {"error": "api_error", "message": f"Profile API failed after {max_retries} attempts"}
 
     try:
-        data = response.json()["data"]["user"]
+        response_data = response.json()
+        
+        # Better error handling for missing data structure
+        if "data" not in response_data:
+            print(f"❌ API response missing 'data' key for @{username_input}")
+            print(f"   Response keys: {list(response_data.keys())}")
+            return {"error": "api_error", "message": "API response missing 'data' key"}
+        
+        if "user" not in response_data["data"]:
+            print(f"❌ API response missing 'user' key for @{username_input}")
+            print(f"   Data keys: {list(response_data['data'].keys())}")
+            return {"error": "api_error", "message": "API response missing 'user' key"}
+        
+        data = response_data["data"]["user"]
         full_name = data.get("full_name")
         bio = data.get("biography")
         avatar_url = data.get("profile_pic_url_hd")
         followers = data.get("edge_followed_by", {}).get("count", 0)
+        
+    except json.JSONDecodeError as e:
+        print(f"❌ Invalid JSON response for @{username_input}: {e}")
+        return {"error": "api_error", "message": f"Invalid JSON response: {str(e)}"}
     except Exception as e:
-        print("❌ Error parsing ScrapeCreators profile data:", str(e))
+        print(f"❌ Error parsing ScrapeCreators profile data for @{username_input}: {str(e)}")
+        print(f"   Response content: {response.text[:500]}...")
         return {"error": "api_error", "message": f"Data parsing error: {str(e)}"}
 
     if followers < 10_000 or followers > 350_000:
@@ -478,14 +524,37 @@ def process_instagram_user(username_input):
     print("\n📡 Fetching post data from ScrapeCreators API...")
     scrapecreators_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username_input}"
     
-    try:
-        posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY}, timeout=20)
-        if posts_response.status_code != 200:
-            print(f"❌ Failed to fetch post data: {posts_response.status_code}")
-            return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
-    except requests.RequestException as e:
-        print(f"❌ Posts API request failed: {e}")
-        return {"error": "api_error", "message": f"Posts API request failed: {str(e)}"}
+    # Add same retry logic for posts API
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = retry_delay * (2 ** (attempt - 1))
+                print(f"   🔄 Posts retry {attempt + 1}/{max_retries} for @{username_input} after {wait_time}s...")
+                time.sleep(wait_time)
+            
+            posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY}, timeout=30)
+            
+            if posts_response.status_code == 200:
+                break  # Success
+            elif posts_response.status_code == 429:
+                print(f"⏳ Rate limited on posts for @{username_input}, waiting longer...")
+                time.sleep(60)
+                continue
+            elif posts_response.status_code in [500, 502, 503, 504, 520]:
+                print(f"🔄 Posts server error {posts_response.status_code} for @{username_input}, retrying...")
+                continue
+            else:
+                print(f"❌ Failed to fetch post data: {posts_response.status_code}")
+                return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
+                
+        except requests.RequestException as e:
+            print(f"❌ Posts API request failed (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                return {"error": "api_error", "message": f"Posts API request failed after {max_retries} attempts: {str(e)}"}
+            continue
+    else:
+        print(f"❌ All {max_retries} posts attempts failed for @{username_input}")
+        return {"error": "api_error", "message": f"Posts API failed after {max_retries} attempts"}
 
     try:
         posts_data = posts_response.json().get("items", [])
@@ -652,14 +721,40 @@ def process_tiktok_account(username, api_key):
     api_url = f"https://api.scrapecreators.com/v3/tiktok/profile/videos?handle={username}"
     headers = {"x-api-key": api_key}
     
-    try:
-        response = requests.get(api_url, headers=headers, timeout=20)
-        if response.status_code != 200:
-            print(f"❌ Failed to fetch data: {response.status_code}")
-            return {"error": "api_error", "message": f"API error: {response.status_code}"}
-    except requests.RequestException as e:
-        print(f"❌ TikTok API request failed: {e}")
-        return {"error": "api_error", "message": f"TikTok API request failed: {str(e)}"}
+    # Add same retry logic for TikTok API
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            if attempt > 0:
+                wait_time = retry_delay * (2 ** (attempt - 1))
+                print(f"   🔄 TikTok retry {attempt + 1}/{max_retries} for @{username} after {wait_time}s...")
+                time.sleep(wait_time)
+            
+            response = requests.get(api_url, headers=headers, timeout=30)
+            
+            if response.status_code == 200:
+                break  # Success
+            elif response.status_code == 429:
+                print(f"⏳ Rate limited on TikTok for @{username}, waiting longer...")
+                time.sleep(60)
+                continue
+            elif response.status_code in [500, 502, 503, 504, 520]:
+                print(f"🔄 TikTok server error {response.status_code} for @{username}, retrying...")
+                continue
+            else:
+                print(f"❌ Failed to fetch TikTok data: {response.status_code}")
+                return {"error": "api_error", "message": f"TikTok API error: {response.status_code}"}
+                
+        except requests.RequestException as e:
+            print(f"❌ TikTok API request failed (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                return {"error": "api_error", "message": f"TikTok API request failed after {max_retries} attempts: {str(e)}"}
+            continue
+    else:
+        print(f"❌ All {max_retries} TikTok attempts failed for @{username}")
+        return {"error": "api_error", "message": f"TikTok API failed after {max_retries} attempts"}
 
     posts = safe_get(response.json(), ['aweme_list'], [])
     if not posts:

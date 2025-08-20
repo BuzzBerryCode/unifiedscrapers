@@ -149,15 +149,15 @@ def process_new_creators(self, job_id: str, resume_from_index: int = 0):
                     processed_items += 1
                     continue
                 
-                # Process based on platform with timeout protection
+                # Process based on platform with timeout protection and better error handling
                 start_time = time.time()
                 try:
                     if platform == 'instagram':
-                        # Use asyncio.wait_for with timeout protection
+                        # Use asyncio.wait_for with timeout protection (increased for retry logic)
                         result = asyncio.run(
                             asyncio.wait_for(
                                 asyncio.to_thread(process_instagram_user, username),
-                                timeout=180  # 3 minute timeout per creator
+                                timeout=300  # 5 minute timeout per creator
                             )
                         )
                     elif platform == 'tiktok':
@@ -165,7 +165,7 @@ def process_new_creators(self, job_id: str, resume_from_index: int = 0):
                         result = asyncio.run(
                             asyncio.wait_for(
                                 asyncio.to_thread(process_tiktok_account, username, SCRAPECREATORS_API_KEY),
-                                timeout=180  # 3 minute timeout per creator
+                                timeout=300  # 5 minute timeout per creator
                             )
                         )
                     else:
@@ -253,9 +253,15 @@ def process_new_creators(self, job_id: str, resume_from_index: int = 0):
                 
                 processed_items += 1
                 
-                # Update progress every item for better monitoring
+                                # Update progress every item for better monitoring
                 update_job_progress(job_id, processed_items, failed_items)
-                
+
+                # Add intelligent rate limiting - less delay for successful API calls
+                if result and isinstance(result, dict) and result.get("error") != "api_error":
+                    time.sleep(0.5)  # Shorter delay for successful calls
+                else:
+                    time.sleep(2)  # Longer delay after API errors to prevent rate limiting
+
                 # Store intermediate results every 5 items
                 if i % 5 == 0:
                     # Store intermediate results including niche stats

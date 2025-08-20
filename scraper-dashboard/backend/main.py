@@ -1419,6 +1419,56 @@ async def startup_event():
     print(f"🔗 Redis URL: {REDIS_URL}")
     print(f"🌐 Port: {port}")
     init_job_table()
+    
+    # Start automatic job processing (bypassing Celery entirely)
+    import threading
+    import time
+    
+    def job_monitor():
+        """Background job monitor that processes pending jobs"""
+        print("🔄 Starting background job monitor...")
+        while True:
+            try:
+                # Check for pending jobs every 10 seconds
+                time.sleep(10)
+                
+                client = get_supabase_client()
+                if client:
+                    # Get pending jobs
+                    response = client.table("scraper_jobs").select("*").eq("status", "pending").order("created_at").limit(1).execute()
+                    
+                    if response.data:
+                        job = response.data[0]
+                        job_id = job["id"]
+                        job_type = job["job_type"]
+                        
+                        print(f"🎯 Found pending job: {job_id} ({job_type})")
+                        
+                        # Check if no jobs are running
+                        running_response = client.table("scraper_jobs").select("id").eq("status", "running").execute()
+                        if not running_response.data:
+                            print(f"🚀 Starting pending job {job_id}")
+                            
+                            # Update to running
+                            client.table("scraper_jobs").update({
+                                "status": "running",
+                                "updated_at": datetime.utcnow().isoformat()
+                            }).eq("id", job_id).execute()
+                            
+                            # Start job directly (bypassing Celery entirely)
+                            start_job_directly(job_id, job_type)
+                        else:
+                            print(f"⏸️ Job {job_id} waiting (another job is running)")
+                
+            except Exception as e:
+                print(f"❌ Job monitor error: {e}")
+                time.sleep(30)  # Wait longer on errors
+    
+    # Start the job monitor in background
+    monitor_thread = threading.Thread(target=job_monitor, daemon=True)
+    monitor_thread.start()
+    print("✅ Background job monitor started")
+    
     print("✅ Scraper Dashboard API started")
 
 if __name__ == "__main__":

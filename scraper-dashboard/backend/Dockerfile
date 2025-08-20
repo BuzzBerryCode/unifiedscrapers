@@ -21,11 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Make startup script executable
-RUN chmod +x start_all.sh
-
 # Expose port
 EXPOSE 8000
 
 # Command to run the application
-CMD ["./start_all.sh"]
+CMD ["python", "entrypoint.py"]

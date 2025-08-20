@@ -344,6 +344,97 @@ async def upload_csv(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/jobs/{job_id}/remove")
+async def remove_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Remove a job from the database (only for completed, failed, or cancelled jobs)"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # First check if the job exists and get its status
+        job_response = supabase.table("scraper_jobs").select("status").eq("id", job_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job_status = job_response.data[0]["status"]
+        
+        # Only allow removal of non-running jobs
+        if job_status in [JobStatus.RUNNING, JobStatus.PENDING, JobStatus.QUEUED]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot remove {job_status} job. Only completed, failed, or cancelled jobs can be removed."
+            )
+        
+        # Delete the job
+        delete_response = supabase.table("scraper_jobs").delete().eq("id", job_id).execute()
+        
+        if not delete_response.data:
+            raise HTTPException(status_code=404, detail="Job not found or already removed")
+        
+        # Also clean up any CSV data in Redis
+        redis_client = get_redis_client()
+        if redis_client:
+            try:
+                redis_client.delete(f"csv_data:{job_id}")
+            except Exception as redis_error:
+                print(f"⚠️ Failed to clean up Redis data for job {job_id}: {redis_error}")
+        
+        return {"message": f"Job {job_id} removed successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Remove job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Cancel a running or pending job"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if job exists
+        job_response = supabase.table("scraper_jobs").select("status").eq("id", job_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job_status = job_response.data[0]["status"]
+        
+        # Only allow cancellation of running, pending, or queued jobs
+        if job_status not in [JobStatus.RUNNING, JobStatus.PENDING, JobStatus.QUEUED]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot cancel {job_status} job. Only running, pending, or queued jobs can be cancelled."
+            )
+        
+        # Update job status to cancelled
+        update_response = supabase.table("scraper_jobs").update({
+            "status": JobStatus.CANCELLED,
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", job_id).execute()
+        
+        if not update_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Start next queued job if this was running
+        if job_status == JobStatus.RUNNING:
+            start_next_queued_job()
+        
+        return {"message": f"Job {job_id} cancelled successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Cancel job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== STARTUP EVENT ====================
 
 @app.on_event("startup")

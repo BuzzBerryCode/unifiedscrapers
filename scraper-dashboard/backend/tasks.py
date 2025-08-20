@@ -8,16 +8,33 @@ from celery import Celery
 import redis
 from supabase import create_client, Client
 
-# Add the parent directory to path to import scrapers
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add current directory to path to import scrapers (they're in the same directory on Railway)
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-# Import the unified scrapers
+# Also try parent directory as fallback
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if parent_dir not in sys.path:
+    sys.path.insert(1, parent_dir)
+
+# Import the unified scrapers with better error handling
 try:
     from UnifiedScraper import process_instagram_user, process_tiktok_account, process_creator_media
     from UnifiedRescaper import rescrape_and_update_creator, get_existing_creators
+    print("✅ Successfully imported scraper functions")
 except ImportError as e:
-    print(f"Warning: Could not import scrapers: {e}")
-    print("Make sure UnifiedScraper.py and UnifiedRescaper.py are in the parent directory")
+    print(f"❌ CRITICAL: Could not import scrapers: {e}")
+    print(f"Current directory: {current_dir}")
+    print(f"Parent directory: {parent_dir}")
+    print(f"Python path: {sys.path}")
+    # List files in current directory
+    try:
+        files = os.listdir(current_dir)
+        print(f"Files in current directory: {[f for f in files if f.endswith('.py')]}")
+    except:
+        pass
+    raise ImportError(f"Cannot import required scraper functions: {e}")
 
 # ==================== CONFIGURATION ====================
 

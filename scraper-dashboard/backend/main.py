@@ -188,15 +188,175 @@ def check_running_jobs() -> bool:
         print(f"❌ Error checking running jobs: {e}")
         return False
 
+def start_job_directly(job_id: str, job_type: str):
+    """Start a job directly without Celery as a fallback mechanism"""
+    import threading
+    import asyncio
+    import json
+    import time
+    
+    print(f"🚀 Starting job {job_id} directly (bypassing Celery)")
+    
+    def run_job():
+        try:
+            # Import required modules
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from UnifiedScraper import process_instagram_user, process_tiktok_account
+            
+            client = get_supabase_client()
+            if not client:
+                raise Exception("Database connection failed")
+            
+            if job_type == "new_creators":
+                # Get CSV data from Redis
+                redis = get_redis_client()
+                if not redis:
+                    raise Exception("Redis connection failed")
+                
+                csv_data_json = redis.get(f"job_data:{job_id}")
+                if not csv_data_json:
+                    raise Exception("CSV data not found in Redis")
+                
+                csv_data = json.loads(csv_data_json)
+                
+                # Run the job processing logic directly
+                total_items = len(csv_data)
+                processed_items = 0
+                failed_items = 0
+                results = {"added": [], "failed": [], "skipped": [], "filtered": []}
+                niche_stats = {"primary_niches": {}, "secondary_niches": {}}
+                
+                print(f"📋 Processing {total_items} creators directly")
+                
+                for i, creator_data in enumerate(csv_data):
+                    try:
+                        username = creator_data['Usernames'].strip()
+                        platform = creator_data['Platform'].lower()
+                        
+                        print(f"   Processing {i + 1}/{total_items}: @{username} ({platform})")
+                        
+                        # Check if already exists
+                        existing = client.table("creatordata").select("id", "platform", "primary_niche").eq("handle", username).execute()
+                        if existing.data:
+                            existing_creator = existing.data[0]
+                            existing_platform = existing_creator.get('platform', 'Unknown')
+                            existing_niche = existing_creator.get('primary_niche', 'Unknown')
+                            results["skipped"].append(f"@{username} - Already exists in database ({existing_platform}, {existing_niche} niche)")
+                            processed_items += 1
+                            continue
+                        
+                        # Process creator
+                        if platform == 'instagram':
+                            result = asyncio.run(
+                                asyncio.wait_for(
+                                    asyncio.to_thread(process_instagram_user, username),
+                                    timeout=300
+                                )
+                            )
+                        elif platform == 'tiktok':
+                            result = asyncio.run(
+                                asyncio.wait_for(
+                                    asyncio.to_thread(process_tiktok_account, username, "wjhGgI14NjNMUuXA92YWXjojozF2"),
+                                    timeout=300
+                                )
+                            )
+                        else:
+                            results["failed"].append(f"@{username} - Unknown platform")
+                            failed_items += 1
+                            processed_items += 1
+                            continue
+                        
+                        # Process result
+                        if result and isinstance(result, dict):
+                            if result.get("error") == "filtered":
+                                results["filtered"].append(f"@{username} - {result.get('message', 'Filtered')}")
+                            elif result.get("error") == "api_error":
+                                results["failed"].append(f"@{username} - {result.get('message', 'API Error')}")
+                                failed_items += 1
+                            elif 'data' in result and result['data']:
+                                results["added"].append(f"@{username}")
+                                # Track niche stats
+                                primary_niche = result['data'].get('primary_niche')
+                                secondary_niche = result['data'].get('secondary_niche')
+                                if primary_niche:
+                                    niche_stats["primary_niches"][primary_niche] = niche_stats["primary_niches"].get(primary_niche, 0) + 1
+                                if secondary_niche:
+                                    niche_stats["secondary_niches"][secondary_niche] = niche_stats["secondary_niches"].get(secondary_niche, 0) + 1
+                            else:
+                                results["failed"].append(f"@{username} - Processing failed")
+                                failed_items += 1
+                        else:
+                            results["failed"].append(f"@{username} - No result returned")
+                            failed_items += 1
+                        
+                        processed_items += 1
+                        
+                        # Update progress
+                        client.table("scraper_jobs").update({
+                            "processed_items": processed_items,
+                            "failed_items": failed_items,
+                            "updated_at": datetime.utcnow().isoformat()
+                        }).eq("id", job_id).execute()
+                        
+                        # Rate limiting
+                        time.sleep(0.5)
+                        
+                    except Exception as e:
+                        print(f"   ❌ Error processing @{username}: {e}")
+                        results["failed"].append(f"@{username} - Error: {str(e)}")
+                        failed_items += 1
+                        processed_items += 1
+                
+                # Final update
+                results["niche_stats"] = niche_stats
+                client.table("scraper_jobs").update({
+                    "status": "completed",
+                    "processed_items": processed_items,
+                    "failed_items": failed_items,
+                    "results": results,
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", job_id).execute()
+                
+                print(f"✅ Job {job_id} completed directly!")
+                
+                # Start next job
+                start_next_queued_job()
+                
+            else:
+                print(f"❌ Direct execution not implemented for job type: {job_type}")
+                
+        except Exception as e:
+            print(f"❌ Direct job execution failed: {e}")
+            # Update job status to failed
+            try:
+                client = get_supabase_client()
+                if client:
+                    client.table("scraper_jobs").update({
+                        "status": "failed",
+                        "error_message": str(e),
+                        "updated_at": datetime.utcnow().isoformat()
+                    }).eq("id", job_id).execute()
+            except:
+                pass
+    
+    # Start in background thread
+    thread = threading.Thread(target=run_job, daemon=True)
+    thread.start()
+    print(f"🎯 Direct execution started for job {job_id}")
+
 def start_next_queued_job():
     """Start the next queued job if no jobs are running and queue is not paused."""
     try:
         print("🔄 Checking for queued jobs...")
         
-        # Check if queue is paused
-        if redis_client.get("queue_paused") == "true":
-            print("⏸️ Queue is paused, skipping job start")
-            return
+        # Check if queue is paused (with safe Redis access)
+        try:
+            redis = get_redis_client()
+            if redis and redis.get("queue_paused") == b"true":
+                print("⏸️ Queue is paused, skipping job start")
+                return
+        except Exception as e:
+            print(f"⚠️ Redis check failed (continuing anyway): {e}")
         
         if check_running_jobs():
             print("⏸️ Already have a running job, skipping")
@@ -221,22 +381,57 @@ def start_next_queued_job():
             client.table("scraper_jobs").update({"status": "running", "updated_at": datetime.utcnow().isoformat()}).eq("id", job_id).execute()
             print(f"✅ Updated job {job_id} status to running")
             
-            # Start the appropriate Celery task
+            # Start the appropriate task with fallback to direct execution
             celery = get_celery_app()
+            task_sent = False
+            
             if celery:
-                if job["job_type"] == "new_creators":
-                    print(f"📤 Sending new_creators task for job {job_id}")
-                    celery.send_task("tasks.process_new_creators", args=[job_id])
-                elif job["job_type"] == "rescrape_platform":
-                    # Extract platform from description or default to Instagram
-                    platform = "Instagram"
-                    if "TikTok" in job.get("description", ""):
-                        platform = "TikTok"
-                    print(f"📤 Sending rescrape_platform task for job {job_id} ({platform})")
-                    celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform])
-                print(f"🎯 Task sent successfully for job {job_id}")
-            else:
-                print("❌ No Celery app available")
+                try:
+                    if job["job_type"] == "new_creators":
+                        print(f"📤 Sending new_creators task for job {job_id}")
+                        celery.send_task("tasks.process_new_creators", args=[job_id])
+                        task_sent = True
+                    elif job["job_type"] == "rescrape_platform":
+                        # Extract platform from description or default to Instagram
+                        platform = "Instagram"
+                        if "TikTok" in job.get("description", ""):
+                            platform = "TikTok"
+                        print(f"📤 Sending rescrape_platform task for job {job_id} ({platform})")
+                        celery.send_task("tasks.rescrape_platform_creators", args=[job_id, platform])
+                        task_sent = True
+                    
+                    if task_sent:
+                        print(f"🎯 Celery task sent successfully for job {job_id}")
+                        
+                        # Wait a moment to see if the task is picked up
+                        import time
+                        time.sleep(2)
+                        
+                        # Check if job is actually progressing
+                        job_check = client.table("scraper_jobs").select("processed_items", "updated_at").eq("id", job_id).execute()
+                        if job_check.data:
+                            # If no progress after 30 seconds, fall back to direct execution
+                            import threading
+                            def check_and_fallback():
+                                time.sleep(30)
+                                job_recheck = client.table("scraper_jobs").select("processed_items", "updated_at").eq("id", job_id).execute()
+                                if job_recheck.data:
+                                    job_data = job_recheck.data[0]
+                                    # If still no progress, start direct execution
+                                    if job_data.get("processed_items", 0) == 0:
+                                        print(f"⚠️ Celery task not progressing, starting direct execution for {job_id}")
+                                        start_job_directly(job_id, job["job_type"])
+                            
+                            # Start the fallback check in background
+                            threading.Thread(target=check_and_fallback, daemon=True).start()
+                    
+                except Exception as e:
+                    print(f"❌ Celery task dispatch failed: {e}")
+                    task_sent = False
+            
+            if not task_sent:
+                print("❌ Celery not available, starting job directly")
+                start_job_directly(job_id, job["job_type"])
         else:
             print("📭 No pending/queued jobs found")
     
@@ -582,7 +777,12 @@ async def pause_queue(
         paused_count = len(response.data) if response.data else 0
         
         # Store queue pause state in Redis
-        redis_client.set("queue_paused", "true")
+        try:
+            redis = get_redis_client()
+            if redis:
+                redis.set("queue_paused", "true")
+        except Exception as e:
+            print(f"⚠️ Redis pause state storage failed: {e}")
         
         return {"message": f"Queue paused. {paused_count} jobs moved to paused status."}
         
@@ -604,7 +804,12 @@ async def resume_queue(
         resumed_count = len(response.data) if response.data else 0
         
         # Remove queue pause state from Redis
-        redis_client.delete("queue_paused")
+        try:
+            redis = get_redis_client()
+            if redis:
+                redis.delete("queue_paused")
+        except Exception as e:
+            print(f"⚠️ Redis pause state removal failed: {e}")
         
         # Try to start the next job if no jobs are currently running
         if not check_running_jobs():
@@ -647,7 +852,13 @@ async def get_queue_status(
             raise HTTPException(status_code=500, detail="Database connection failed")
         
         # Check if queue is paused
-        is_paused = redis_client.get("queue_paused") == "true"
+        is_paused = False
+        try:
+            redis = get_redis_client()
+            if redis:
+                is_paused = redis.get("queue_paused") == b"true"
+        except Exception as e:
+            print(f"⚠️ Redis pause check failed: {e}")
         
         # Get counts of jobs by status
         running_jobs = client.table("scraper_jobs").select("id", count="exact").eq("status", "running").execute()
@@ -674,8 +885,12 @@ async def start_queue(
     """Manually trigger the job queue to start pending jobs."""
     try:
         # Check if queue is paused
-        if redis_client.get("queue_paused") == "true":
-            raise HTTPException(status_code=400, detail="Queue is paused. Resume queue first.")
+        try:
+            redis = get_redis_client()
+            if redis and redis.get("queue_paused") == b"true":
+                raise HTTPException(status_code=400, detail="Queue is paused. Resume queue first.")
+        except Exception as e:
+            print(f"⚠️ Redis pause check failed (continuing anyway): {e}")
         
         # Force start the next job regardless of running job check
         client = get_supabase_client()

@@ -299,10 +299,29 @@ async def upload_csv(
         contents = await file.read()
         df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
         
-        # Validate CSV structure
+        # Validate CSV structure - check for both possible column name formats
         required_columns = ['username', 'platform']
-        if not all(col in df.columns for col in required_columns):
-            raise HTTPException(status_code=400, detail=f"CSV must contain columns: {required_columns}")
+        alt_columns = ['Usernames', 'Platform']
+        
+        # Check if CSV has the expected columns (either format)
+        if all(col in df.columns for col in required_columns):
+            # Standard format - no changes needed
+            pass
+        elif all(col in df.columns for col in alt_columns):
+            # Alternative format - rename columns
+            df = df.rename(columns={'Usernames': 'username', 'Platform': 'platform'})
+            print(f"✅ Renamed CSV columns: Usernames->username, Platform->platform")
+        else:
+            raise HTTPException(status_code=400, detail=f"CSV must contain columns: {required_columns} or {alt_columns}")
+        
+        # Clean and validate data
+        df = df.dropna(subset=['username', 'platform'])
+        df['platform'] = df['platform'].str.lower()
+        valid_platforms = ['instagram', 'tiktok']
+        df = df[df['platform'].isin(valid_platforms)]
+        
+        if len(df) == 0:
+            raise HTTPException(status_code=400, detail="No valid creators found in CSV")
         
         # Create job
         job_id = str(uuid.uuid4())
@@ -311,32 +330,14 @@ async def upload_csv(
         if not supabase:
             raise HTTPException(status_code=500, detail="Database connection failed")
         
-        # Store CSV data in Redis with longer expiry and also in Supabase as backup
-        redis_client = get_redis_client()
+        # Prepare CSV data
         csv_data = df.to_dict('records')
-        
-        # Store in Redis with longer expiry (24 hours)
-        if redis_client:
-            try:
-                redis_client.setex(f"csv_data:{job_id}", 86400, json.dumps(csv_data))  # 24 hour expiry
-                print(f"✅ CSV data stored in Redis for job {job_id}")
-            except Exception as redis_error:
-                print(f"⚠️ Redis storage failed: {redis_error}")
-        
-        # Also store CSV data in Supabase as backup (in case Redis is cleared)
-        try:
-            supabase.table("scraper_jobs").update({
-                "description": json.dumps(csv_data)  # Store CSV data in description field
-            }).eq("id", job_id).execute()
-            print(f"✅ CSV data backed up in Supabase for job {job_id}")
-        except Exception as backup_error:
-            print(f"⚠️ Supabase backup failed: {backup_error}")
         
         # Determine if there are running jobs
         running_jobs = check_running_jobs()
         initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
         
-        # Create job record
+        # Create job record FIRST (with CSV data included)
         job_data = {
             "id": job_id,
             "job_type": "new_creators",
@@ -344,10 +345,23 @@ async def upload_csv(
             "total_items": len(df),
             "processed_items": 0,
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": json.dumps(csv_data)  # Store CSV data directly in job record
         }
         
         supabase.table("scraper_jobs").insert(job_data).execute()
+        print(f"✅ Job {job_id} created with CSV data in Supabase")
+        
+        # Also store in Redis for faster access
+        redis_client = get_redis_client()
+        if redis_client:
+            try:
+                redis_client.setex(f"csv_data:{job_id}", 86400, json.dumps(csv_data))  # 24 hour expiry
+                print(f"✅ CSV data stored in Redis for job {job_id}")
+            except Exception as redis_error:
+                print(f"⚠️ Redis storage failed: {redis_error}")
+        else:
+            print(f"⚠️ Redis not available, CSV data only stored in Supabase")
         
         # Start next job if none running
         if not running_jobs:

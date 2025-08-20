@@ -312,8 +312,7 @@ async def upload_csv(
             "total_items": len(df),
             "processed_items": 0,
             "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "filename": file.filename
+            "updated_at": datetime.utcnow().isoformat()
         }
         
         supabase.table("scraper_jobs").insert(job_data).execute()

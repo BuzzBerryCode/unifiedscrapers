@@ -4,7 +4,6 @@ import json
 import asyncio
 import time
 from datetime import datetime
-from celery import Celery
 import redis
 from supabase import create_client, Client
 
@@ -38,32 +37,9 @@ except ImportError as e:
 
 # ==================== CONFIGURATION ====================
 
-# Redis & Celery
+# Redis
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-redis_client = redis.from_url(REDIS_URL)
-
-# Celery app
-celery_app = Celery(
-    "scraper_tasks",
-    broker=REDIS_URL,
-    backend=REDIS_URL
-)
-
-# Celery configuration
-celery_app.conf.update(
-    task_serializer='json',
-    accept_content=['json'],
-    result_serializer='json',
-    timezone='UTC',
-    enable_utc=True,
-    task_track_started=True,
-
-    worker_prefetch_multiplier=1,
-    task_acks_late=True,
-    worker_disable_rate_limits=False,
-    task_default_retry_delay=60,
-    task_max_retries=3
-)
+redis_client = redis.from_url(REDIS_URL, decode_responses=True)
 
 # Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovwhgnwenxbyvpevcz.supabase.co")
@@ -100,10 +76,9 @@ def update_job_progress(job_id: str, processed_items: int, failed_items: int = 0
     except Exception as e:
         print(f"Error updating job progress {job_id}: {e}")
 
-# ==================== CELERY TASKS ====================
+# ==================== TASK FUNCTIONS ====================
 
-@celery_app.task(bind=True)
-def process_new_creators(self, job_id: str, resume_from_index: int = 0):
+def process_new_creators(job_id: str, resume_from_index: int = 0):
     """Process new creators from CSV data with resume functionality."""
     try:
         print(f"Starting job {job_id}: process_new_creators")
@@ -355,8 +330,7 @@ def process_new_creators(self, job_id: str, resume_from_index: int = 0):
         update_job_status(job_id, "failed", error_message=str(e))
         raise
 
-@celery_app.task(bind=True)
-def rescrape_all_creators(self, job_id: str):
+def rescrape_all_creators(job_id: str):
     """Rescrape all creators in the database."""
     try:
         print(f"Starting job {job_id}: rescrape_all_creators")
@@ -431,8 +405,7 @@ def rescrape_all_creators(self, job_id: str):
         update_job_status(job_id, "failed", error_message=str(e))
         raise
 
-@celery_app.task(bind=True)
-def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_index: int = 0):
+def rescrape_platform_creators(job_id: str, platform: str, resume_from_index: int = 0):
     """Rescrape creators for a specific platform with resume functionality."""
     try:
         print(f"Starting job {job_id}: rescrape_platform_creators ({platform})")
@@ -580,7 +553,6 @@ def rescrape_platform_creators(self, job_id: str, platform: str, resume_from_ind
         update_job_status(job_id, "failed", error_message=str(e))
         raise
 
-# ==================== CELERY WORKER SETUP ====================
+# ==================== TASK FUNCTIONS READY ====================
 
-if __name__ == '__main__':
-    celery_app.start()
+# All task functions are now available for direct import and execution

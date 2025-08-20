@@ -219,7 +219,8 @@ def job_monitor():
         except Exception as e:
             print(f"❌ Job monitor error: {e}")
             traceback.print_exc()
-            time.sleep(30)  # Wait longer on error
+            # Don't sleep too long on error to keep monitoring active
+            time.sleep(10)
 
 # ==================== API ENDPOINTS ====================
 
@@ -310,11 +311,26 @@ async def upload_csv(
         if not supabase:
             raise HTTPException(status_code=500, detail="Database connection failed")
         
-        # Store CSV data in Redis
+        # Store CSV data in Redis with longer expiry and also in Supabase as backup
         redis_client = get_redis_client()
+        csv_data = df.to_dict('records')
+        
+        # Store in Redis with longer expiry (24 hours)
         if redis_client:
-            csv_data = df.to_dict('records')
-            redis_client.setex(f"csv_data:{job_id}", 3600, json.dumps(csv_data))  # 1 hour expiry
+            try:
+                redis_client.setex(f"csv_data:{job_id}", 86400, json.dumps(csv_data))  # 24 hour expiry
+                print(f"✅ CSV data stored in Redis for job {job_id}")
+            except Exception as redis_error:
+                print(f"⚠️ Redis storage failed: {redis_error}")
+        
+        # Also store CSV data in Supabase as backup (in case Redis is cleared)
+        try:
+            supabase.table("scraper_jobs").update({
+                "description": json.dumps(csv_data)  # Store CSV data in description field
+            }).eq("id", job_id).execute()
+            print(f"✅ CSV data backed up in Supabase for job {job_id}")
+        except Exception as backup_error:
+            print(f"⚠️ Supabase backup failed: {backup_error}")
         
         # Determine if there are running jobs
         running_jobs = check_running_jobs()
@@ -468,6 +484,11 @@ async def startup_event():
         print(f"❌ Startup error: {e}")
         traceback.print_exc()
         # Don't raise the exception to prevent shutdown
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    print("🛑 Scraper Dashboard API shutting down...")
+    print("💾 Application shutdown complete")
 
 if __name__ == "__main__":
     import uvicorn

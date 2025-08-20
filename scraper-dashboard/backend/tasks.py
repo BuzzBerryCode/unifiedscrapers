@@ -87,10 +87,23 @@ def process_new_creators(job_id: str, resume_from_index: int = 0):
         
         update_job_status(job_id, "running")
         
-        # Get CSV data from Redis
-        csv_data_json = redis_client.get(f"job_data:{job_id}")
+        # Get CSV data from Redis (try both possible keys)
+        csv_data_json = redis_client.get(f"csv_data:{job_id}")
         if not csv_data_json:
-            raise Exception("CSV data not found in Redis")
+            csv_data_json = redis_client.get(f"job_data:{job_id}")  # Fallback to old key
+        
+        # If not in Redis, try to get from Supabase backup
+        if not csv_data_json:
+            print(f"⚠️ CSV data not found in Redis for job {job_id}, checking Supabase backup...")
+            try:
+                job_response = supabase.table("scraper_jobs").select("description").eq("id", job_id).execute()
+                if job_response.data and job_response.data[0].get("description"):
+                    csv_data_json = job_response.data[0]["description"]
+                    print(f"✅ Found CSV data in Supabase backup for job {job_id}")
+                else:
+                    raise Exception("CSV data not found in Redis or Supabase backup")
+            except Exception as e:
+                raise Exception(f"CSV data not found in Redis or Supabase backup: {e}")
         
         csv_data = json.loads(csv_data_json)
         total_items = len(csv_data)

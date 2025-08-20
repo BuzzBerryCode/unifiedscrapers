@@ -893,6 +893,83 @@ async def direct_restart_job(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error directly restarting job: {str(e)}")
 
+@app.post("/jobs/force-start-pending")
+async def force_start_pending_job(
+    current_user: str = Depends(verify_token)
+):
+    """Force start the pending job from position 380."""
+    try:
+        client = get_supabase_client()
+        if not client:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get the specific pending job
+        job_id = "df295d3d-22ab-4dcd-91a5-f24838cee348"
+        resume_from_index = 380
+        
+        # Update job status and position
+        client.table("scraper_jobs").update({
+            "status": "running",
+            "processed_items": resume_from_index,
+            "updated_at": datetime.utcnow().isoformat()
+        }).eq("id", job_id).execute()
+        
+        # Try Celery first, then fallback to direct execution
+        celery = get_celery_app()
+        if celery:
+            try:
+                celery.send_task("tasks.process_new_creators", args=[job_id, resume_from_index])
+                return {
+                    "message": f"Job {job_id} started via Celery from position {resume_from_index}",
+                    "method": "celery",
+                    "resume_from_index": resume_from_index,
+                    "remaining_items": 507 - resume_from_index
+                }
+            except Exception as e:
+                print(f"Celery failed, trying direct execution: {e}")
+        
+        # Fallback to direct execution
+        import threading
+        import asyncio
+        
+        def run_job_directly():
+            try:
+                # Create a new event loop for this thread
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                
+                # Import and run the task function directly
+                from tasks import process_new_creators
+                task_instance = process_new_creators()
+                task_instance.apply(args=[job_id, resume_from_index])
+                
+                loop.close()
+            except Exception as e:
+                print(f"❌ Direct job execution failed: {e}")
+                # Update job status to failed
+                try:
+                    client.table("scraper_jobs").update({
+                        "status": "failed",
+                        "error_message": str(e),
+                        "updated_at": datetime.utcnow().isoformat()
+                    }).eq("id", job_id).execute()
+                except:
+                    pass
+        
+        # Start the job in a background thread
+        thread = threading.Thread(target=run_job_directly, daemon=True)
+        thread.start()
+        
+        return {
+            "message": f"Job {job_id} started directly from position {resume_from_index}",
+            "method": "direct",
+            "resume_from_index": resume_from_index,
+            "remaining_items": 507 - resume_from_index
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error force starting job: {str(e)}")
+
 @app.post("/jobs/{job_id}/trigger")
 async def trigger_job(job_id: str, current_user: str = Depends(verify_token)):
     """Manually trigger a pending job for testing."""

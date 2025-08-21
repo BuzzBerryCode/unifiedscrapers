@@ -126,6 +126,7 @@ def process_new_creators(job_id: str, resume_from_index: int = 0):
         print(f"Processing {len(csv_data)} creators (starting from {resume_from_index + 1}/{total_items})")
         
         for i, creator_data in enumerate(csv_data):
+            username = "unknown"  # Initialize username for error handling
             try:
                 # Check job-level timeout
                 current_time = time.time()
@@ -140,8 +141,8 @@ def process_new_creators(job_id: str, resume_from_index: int = 0):
                     results["failed"].append(f"Job stuck - no progress for {(current_time - last_progress_time)/60:.1f} minutes")
                     break
                 
-                username = creator_data['Usernames'].strip()
-                platform = creator_data['Platform'].lower()
+                username = creator_data['username'].strip()
+                platform = creator_data['platform'].lower()
                 current_index = resume_from_index + i
                 
                 print(f"Processing {current_index + 1}/{total_items}: @{username} ({platform})")

@@ -1,7 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { toast } from 'react-hot-toast'
+import Image from 'next/image'
+import Link from 'next/link'
+import { toast, Toaster } from 'react-hot-toast'
 import { 
   ArrowPathIcon,
   CalendarIcon,
@@ -9,14 +11,16 @@ import {
   ClockIcon,
   UserGroupIcon,
   PlayIcon,
-  Cog6ToothIcon
+  Cog6ToothIcon,
+  SunIcon,
+  MoonIcon
 } from '@heroicons/react/24/outline'
 
 interface RescrapeStats {
   total_creators: number
   creators_need_dates: number
   creators_due_rescrape: number
-  weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number } }
+  weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number; is_today?: boolean } }
   recent_jobs: Array<{
     id: string
     job_type: string
@@ -39,26 +43,26 @@ export default function RescrapeManagement() {
   const [dueCreators, setDueCreators] = useState<DueCreator[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState('')
-  const [darkMode, setDarkMode] = useState(false)
+  const [darkMode, setDarkMode] = useState(true) // Default to dark mode
 
-  // Check dark mode on component mount
+  // Check dark mode on component mount and handle authentication
   useEffect(() => {
-    const isDark = document.documentElement.classList.contains('dark')
-    setDarkMode(isDark)
-    
-    // Listen for dark mode changes
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class') {
-          const isDark = document.documentElement.classList.contains('dark')
-          setDarkMode(isDark)
-        }
-      })
-    })
-    
-    observer.observe(document.documentElement, { attributes: true })
-    return () => observer.disconnect()
+    // Check authentication first
+    const token = localStorage.getItem('token')
+    if (!token) {
+      window.location.href = '/'
+      return
+    }
+
+    // Set dark mode to true by default
+    setDarkMode(true)
+    document.documentElement.classList.add('dark')
   }, [])
+
+  const handleLogout = () => {
+    localStorage.removeItem('token')
+    window.location.href = '/'
+  }
 
   const fetchData = async () => {
     try {
@@ -199,7 +203,92 @@ export default function RescrapeManagement() {
 
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <Toaster position="top-right" />
+      
+      {/* Header */}
+      <header className={`shadow-sm border-b transition-colors ${
+        darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            <div className="flex items-center space-x-8">
+              <div className="flex items-center space-x-3">
+                <Image
+                  src="/Buzzberry profile picture rounded corners-256x256.png" 
+                  alt="BuzzBerry Logo" 
+                  width={32} 
+                  height={32} 
+                  className="rounded-lg"
+                />
+                <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  Scraper Dashboard
+                </h1>
+              </div>
+              
+              {/* Navigation */}
+              <nav className="flex items-center space-x-6">
+                <Link
+                  href="/"
+                  className={`text-sm font-medium transition-colors ${
+                    darkMode 
+                      ? 'text-gray-300 hover:text-white' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Dashboard
+                </Link>
+                <Link
+                  href="/rescraping"
+                  className={`text-sm font-medium transition-colors ${
+                    darkMode 
+                      ? 'text-white hover:text-gray-300' 
+                      : 'text-gray-900 hover:text-gray-600'
+                  }`}
+                >
+                  Rescraping
+                </Link>
+              </nav>
+            </div>
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => {
+                  const newDarkMode = !darkMode
+                  setDarkMode(newDarkMode)
+                  if (newDarkMode) {
+                    document.documentElement.classList.add('dark')
+                  } else {
+                    document.documentElement.classList.remove('dark')
+                  }
+                }}
+                className={`p-2 rounded-lg transition-colors ${
+                  darkMode 
+                    ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
+                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                }`}
+                title="Toggle dark mode"
+              >
+                {darkMode ? (
+                  <SunIcon className="h-5 w-5" />
+                ) : (
+                  <MoonIcon className="h-5 w-5" />
+                )}
+              </button>
+              <button
+                onClick={handleLogout}
+                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  darkMode 
+                    ? 'text-gray-300 hover:text-white' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Logout
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -277,25 +366,57 @@ export default function RescrapeManagement() {
             </h2>
             <div className="space-y-3">
               {stats?.weekly_schedule && Object.values(stats?.weekly_schedule || {}).map((day) => (
-                <div key={day.day} className="flex items-center justify-between">
+                <div key={day.day} className={`flex items-center justify-between p-3 rounded-lg ${
+                  day.is_today 
+                    ? (darkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200')
+                    : (darkMode ? 'bg-gray-700/50' : 'bg-gray-50')
+                }`}>
                   <div>
-                    <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {day.day}
-                    </span>
-                    <span className={`ml-2 text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {day.date}
-                    </span>
+                    <div className="flex items-center">
+                      <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                        {day.day}
+                      </span>
+                      {day.is_today && (
+                        <span className="ml-2 text-xs px-2 py-1 rounded-full bg-blue-600 text-white">
+                          TODAY
+                        </span>
+                      )}
+                    </div>
+                    <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                      {day.date} • {day.estimated_creators > 0 ? `${day.estimated_creators} creators due` : 'No creators due'}
+                    </div>
                   </div>
                   <div className="flex items-center">
-                    <div className={`w-32 bg-gray-200 dark:bg-gray-700 rounded-full h-2 mr-3`}>
-                      <div 
-                        className="bg-blue-500 h-2 rounded-full" 
-                        style={{ width: `${Math.min((day.estimated_creators / 300) * 100, 100)}%` }}
-                      ></div>
-                    </div>
-                    <span className={`text-sm font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                      {day.estimated_creators}
-                    </span>
+                    {day.estimated_creators > 0 && (
+                      <>
+                        <div className={`w-24 bg-gray-200 dark:bg-gray-600 rounded-full h-2 mr-3`}>
+                          <div 
+                            className={`h-2 rounded-full ${
+                              day.is_today ? 'bg-blue-500' :
+                              day.estimated_creators > 100 ? 'bg-red-500' :
+                              day.estimated_creators > 50 ? 'bg-orange-500' : 'bg-green-500'
+                            }`}
+                            style={{ width: `${Math.min((day.estimated_creators / 200) * 100, 100)}%` }}
+                          ></div>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          day.is_today
+                            ? 'bg-blue-600 text-white'
+                            : day.estimated_creators > 100
+                            ? (darkMode ? 'bg-red-900/50 text-red-300' : 'bg-red-100 text-red-800')
+                            : day.estimated_creators > 50
+                            ? (darkMode ? 'bg-orange-900/50 text-orange-300' : 'bg-orange-100 text-orange-800')
+                            : (darkMode ? 'bg-green-900/50 text-green-300' : 'bg-green-100 text-green-800')
+                        }`}>
+                          {day.estimated_creators}
+                        </span>
+                      </>
+                    )}
+                    {day.estimated_creators === 0 && (
+                      <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                        No jobs scheduled
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -451,7 +572,7 @@ export default function RescrapeManagement() {
             </div>
           </div>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

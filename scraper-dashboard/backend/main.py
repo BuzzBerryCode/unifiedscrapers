@@ -808,26 +808,29 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
         due_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago).execute()
         creators_due = due_response.count
         
-        # Get creators by day of week for next 7 days
+        # Get creators by day of week for next 7 days based on actual updated_at dates
         schedule = {}
         for i in range(7):
-            date = datetime.utcnow() + timedelta(days=i)
-            day_name = date.strftime("%A")
+            target_date = datetime.utcnow() + timedelta(days=i)
+            day_name = target_date.strftime("%A")
             
-            # Calculate how many creators would be due on this day
-            # This is a rough estimate based on spreading creators evenly
-            creators_for_day = (creators_due + creators_need_dates) // 7
-            if i < (creators_due + creators_need_dates) % 7:
-                creators_for_day += 1
-                
+            # Calculate the date 7 days ago from target_date (when creators would have been last updated)
+            seven_days_before_target = target_date - timedelta(days=7)
+            start_of_day = seven_days_before_target.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = start_of_day + timedelta(days=1)
+            
+            # Count creators that were updated on that day (and thus due for rescraping on target_date)
+            creators_due_count = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_of_day.isoformat()).lt("updated_at", end_of_day.isoformat()).execute()
+            
             schedule[day_name] = {
-                "date": date.strftime("%Y-%m-%d"),
+                "date": target_date.strftime("%Y-%m-%d"),
                 "day": day_name,
-                "estimated_creators": creators_for_day
+                "estimated_creators": creators_due_count.count,
+                "is_today": i == 0
             }
         
-        # Get recent rescraping jobs
-        recent_jobs = supabase.table("scraper_jobs").select("*").in_("job_type", ["rescrape_all", "rescrape_instagram", "rescrape_tiktok"]).order("created_at", desc=True).limit(10).execute()
+        # Get recent rescraping jobs (including daily jobs)
+        recent_jobs = supabase.table("scraper_jobs").select("*").in_("job_type", ["rescrape_all", "rescrape_instagram", "rescrape_tiktok", "daily_rescrape"]).order("created_at", desc=True).limit(10).execute()
         
         return {
             "total_creators": total_creators,

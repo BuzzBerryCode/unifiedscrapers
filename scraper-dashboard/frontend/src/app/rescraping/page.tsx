@@ -276,7 +276,7 @@ export default function RescrapeManagement() {
               Weekly Rescraping Schedule
             </h2>
             <div className="space-y-3">
-              {stats?.weekly_schedule && Object.values(stats.weekly_schedule).map((day) => (
+              {stats?.weekly_schedule && Object.values(stats?.weekly_schedule || {}).map((day) => (
                 <div key={day.day} className="flex items-center justify-between">
                   <div>
                     <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
@@ -315,7 +315,7 @@ export default function RescrapeManagement() {
                     Populate Missing Dates
                   </h3>
                   <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    {stats.creators_need_dates} creators need updated_at dates. This will spread them across the past week.
+                    {stats?.creators_need_dates || 0} creators need updated_at dates. This will spread them across the past week.
                   </p>
                   <button
                     onClick={handlePopulateDates}
@@ -394,7 +394,7 @@ export default function RescrapeManagement() {
             </h2>
             <div className="space-y-3">
               {stats?.recent_jobs && stats.recent_jobs.length > 0 ? (
-                stats.recent_jobs.map((job) => (
+                stats?.recent_jobs?.map((job) => (
                   <div key={job.id} className={`p-3 border rounded-lg ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
                     <div className="flex items-center justify-between">
                       <div>

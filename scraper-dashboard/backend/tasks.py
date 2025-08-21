@@ -78,12 +78,28 @@ def update_job_progress(job_id: str, processed_items: int, failed_items: int = 0
 
 # ==================== TASK FUNCTIONS ====================
 
+def load_checkpoint(job_id: str):
+    """Load checkpoint data for job resume"""
+    try:
+        checkpoint_json = redis_client.get(f"checkpoint:{job_id}")
+        if checkpoint_json:
+            return json.loads(checkpoint_json)
+    except Exception as e:
+        print(f"⚠️ Failed to load checkpoint: {e}")
+    return None
+
 def process_new_creators(job_id: str, resume_from_index: int = 0):
     """Process new creators from CSV data with resume functionality."""
     try:
         print(f"Starting job {job_id}: process_new_creators")
-        if resume_from_index > 0:
-            print(f"🔄 RESUMING from index {resume_from_index}")
+        
+        # Try to load checkpoint first
+        checkpoint = load_checkpoint(job_id)
+        if checkpoint and resume_from_index == 0:
+            resume_from_index = checkpoint.get("resume_from_index", 0)
+            print(f"🔄 RESUMING from checkpoint at index {resume_from_index}")
+        elif resume_from_index > 0:
+            print(f"🔄 RESUMING from manual index {resume_from_index}")
         
         update_job_status(job_id, "running")
         
@@ -281,6 +297,21 @@ def process_new_creators(job_id: str, resume_from_index: int = 0):
                         "filtered": results["filtered"].copy(),
                         "niche_stats": niche_stats.copy()
                     }
+                    
+                    # Save checkpoint for resume functionality
+                    checkpoint_data = {
+                        "resume_from_index": resume_from_index + i + 1,
+                        "processed_items": processed_items,
+                        "failed_items": failed_items,
+                        "results": results,
+                        "niche_stats": niche_stats
+                    }
+                    try:
+                        redis_client.setex(f"checkpoint:{job_id}", 3600, json.dumps(checkpoint_data))  # 1 hour expiry
+                        print(f"💾 Checkpoint saved at creator {resume_from_index + i + 1}")
+                    except Exception as checkpoint_error:
+                        print(f"⚠️ Failed to save checkpoint: {checkpoint_error}")
+                    
                     update_job_status(
                         job_id,
                         "running",

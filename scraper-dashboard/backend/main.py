@@ -587,6 +587,58 @@ async def create_rescrape_job(request: dict, current_user: str = Depends(verify_
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/jobs/{job_id}/restart")
+async def restart_stuck_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Restart a stuck job from its last checkpoint"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if job exists
+        job_response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        job_type = job["job_type"]
+        
+        # Only allow restarting of failed or stuck jobs
+        if job["status"] not in ["failed", "running"]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot restart {job['status']} job. Only failed or running jobs can be restarted."
+            )
+        
+        # Check if there are other running jobs
+        if check_running_jobs() and job["status"] != "running":
+            new_status = JobStatus.QUEUED
+        else:
+            new_status = JobStatus.PENDING
+        
+        # Update job status
+        supabase.table("scraper_jobs").update({
+            "status": new_status,
+            "updated_at": datetime.utcnow().isoformat(),
+            "error_message": None  # Clear any previous error
+        }).eq("id", job_id).execute()
+        
+        print(f"🔄 Restarting stuck job {job_id} from checkpoint")
+        
+        # Start job if no others are running
+        if new_status == JobStatus.PENDING:
+            start_next_queued_job()
+        
+        return {"message": f"Job {job_id} restarted successfully", "status": new_status}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Restart job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== STARTUP EVENT ====================
 
 @app.on_event("startup")

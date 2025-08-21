@@ -18,6 +18,7 @@ import sys
 import traceback
 import threading
 import time
+import signal
 
 # ==================== CONFIGURATION ====================
 
@@ -466,6 +467,126 @@ async def cancel_job(job_id: str, current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/jobs/{job_id}/resume")
+async def resume_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Resume a failed or cancelled job"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if job exists and get details
+        job_response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        
+        if not job_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        job = job_response.data[0]
+        job_status = job["status"]
+        job_type = job["job_type"]
+        
+        # Only allow resuming of failed or cancelled jobs
+        if job_status not in [JobStatus.FAILED, JobStatus.CANCELLED]:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Cannot resume {job_status} job. Only failed or cancelled jobs can be resumed."
+            )
+        
+        # Check if there are running jobs
+        if check_running_jobs():
+            # Set to queued if other jobs are running
+            new_status = JobStatus.QUEUED
+        else:
+            new_status = JobStatus.PENDING
+        
+        # Update job status
+        supabase.table("scraper_jobs").update({
+            "status": new_status,
+            "updated_at": datetime.utcnow().isoformat(),
+            "error_message": None  # Clear any previous error
+        }).eq("id", job_id).execute()
+        
+        # Start job if no others are running
+        if new_status == JobStatus.PENDING:
+            start_next_queued_job()
+        
+        return {"message": f"Job {job_id} resumed successfully", "status": new_status}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Resume job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/jobs/rescrape")
+async def create_rescrape_job(request: dict, current_user: str = Depends(verify_token)):
+    """Create a new rescraping job"""
+    try:
+        job_type = request.get("type", "rescrape_all")  # Default to rescrape all
+        platform = request.get("platform", "all")
+        
+        # Generate job ID
+        job_id = str(uuid.uuid4())
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Determine job type and description based on request
+        if job_type == "rescrape_all" or platform == "all":
+            job_type_db = "rescrape_all"
+            description = "Rescrape all creators (Instagram and TikTok)"
+            # Get total count of all creators
+            total_response = supabase.table("creatordata").select("id", count="exact").execute()
+            total_items = total_response.count
+        elif platform == "instagram":
+            job_type_db = "rescrape_instagram"
+            description = "Rescrape all Instagram creators"
+            # Get count of Instagram creators
+            total_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "instagram").execute()
+            total_items = total_response.count
+        elif platform == "tiktok":
+            job_type_db = "rescrape_tiktok"
+            description = "Rescrape all TikTok creators"
+            # Get count of TikTok creators
+            total_response = supabase.table("creatordata").select("id", count="exact").eq("platform", "tiktok").execute()
+            total_items = total_response.count
+        else:
+            raise HTTPException(status_code=400, detail="Invalid platform specified")
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        # Create job record
+        job_data = {
+            "id": job_id,
+            "job_type": job_type_db,
+            "status": initial_status,
+            "total_items": total_items,
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": description
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        print(f"✅ Rescrape job {job_id} created ({job_type_db})")
+        
+        # Start job if no others are running
+        if not running_jobs:
+            start_next_queued_job()
+        
+        return {"job_id": job_id, "status": initial_status, "total_creators": total_items}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Create rescrape job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== STARTUP EVENT ====================
 
 @app.on_event("startup")
@@ -504,6 +625,17 @@ async def startup_event():
 async def shutdown_event():
     print("🛑 Scraper Dashboard API shutting down...")
     print("💾 Application shutdown complete")
+
+# ==================== SIGNAL HANDLERS ====================
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    print(f"🛑 Received signal {signum}, shutting down gracefully...")
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 if __name__ == "__main__":
     import uvicorn

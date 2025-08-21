@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import dynamic from 'next/dynamic'
 import { toast, Toaster } from 'react-hot-toast'
 import { 
@@ -370,7 +371,7 @@ export default function Dashboard() {
               
               {/* Navigation */}
               <nav className="flex items-center space-x-6">
-                <a
+                <Link
                   href="/"
                   className={`text-sm font-medium transition-colors ${
                     darkMode 
@@ -379,8 +380,8 @@ export default function Dashboard() {
                   }`}
                 >
                   Dashboard
-                </a>
-                <a
+                </Link>
+                <Link
                   href="/rescraping"
                   className={`text-sm font-medium transition-colors ${
                     darkMode 
@@ -389,7 +390,7 @@ export default function Dashboard() {
                   }`}
                 >
                   Rescraping
-                </a>
+                </Link>
               </nav>
             </div>
             <div className="flex items-center space-x-4">

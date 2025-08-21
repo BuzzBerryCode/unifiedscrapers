@@ -17,7 +17,13 @@ interface RescrapeStats {
   creators_need_dates: number
   creators_due_rescrape: number
   weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number } }
-  recent_jobs: any[]
+  recent_jobs: Array<{
+    id: string
+    job_type: string
+    status: string
+    total_items: number
+    created_at: string
+  }>
 }
 
 interface DueCreator {
@@ -125,16 +131,23 @@ export default function RescrapeManagement() {
     setActionLoading(`rescrape-${platform}`)
     try {
       const token = localStorage.getItem('token')
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/start-auto-rescrape`, {
+      
+      let endpoint = '/rescraping/start-auto-rescrape'
+      let body = { platform, max_creators: 100 }
+      
+      // Use daily scheduling for "all" platform
+      if (platform === 'daily') {
+        endpoint = '/rescraping/schedule-daily'
+        body = {}
+      }
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ 
-          platform,
-          max_creators: 100 
-        })
+        body: JSON.stringify(body)
       })
       
       if (response.ok) {
@@ -325,45 +338,47 @@ export default function RescrapeManagement() {
                   Start Rescraping
                 </h3>
                 <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Start automatic rescraping for creators that haven't been updated in 7+ days.
+                  Start automatic rescraping for creators that haven&apos;t been updated in 7+ days.
                 </p>
-                <div className="flex space-x-2">
+                <div className="space-y-2">
                   <button
-                    onClick={() => handleStartRescrape('all')}
+                    onClick={() => handleStartRescrape('daily')}
                     disabled={actionLoading.startsWith('rescrape')}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
+                    className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
                   >
-                    {actionLoading === 'rescrape-all' ? (
+                    {actionLoading === 'rescrape-daily' ? (
                       <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
                     ) : (
-                      <PlayIcon className="h-4 w-4 mr-2" />
+                      <CalendarIcon className="h-4 w-4 mr-2" />
                     )}
-                    All Platforms
+                    Daily Rescrape (Recommended)
                   </button>
-                  <button
-                    onClick={() => handleStartRescrape('instagram')}
-                    disabled={actionLoading.startsWith('rescrape')}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'rescrape-instagram' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <PlayIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Instagram
-                  </button>
-                  <button
-                    onClick={() => handleStartRescrape('tiktok')}
-                    disabled={actionLoading.startsWith('rescrape')}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'rescrape-tiktok' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <PlayIcon className="h-4 w-4 mr-2" />
-                    )}
-                    TikTok
-                  </button>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={() => handleStartRescrape('instagram')}
+                      disabled={actionLoading.startsWith('rescrape')}
+                      className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
+                    >
+                      {actionLoading === 'rescrape-instagram' ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <PlayIcon className="h-4 w-4 mr-2" />
+                      )}
+                      Instagram Only
+                    </button>
+                    <button
+                      onClick={() => handleStartRescrape('tiktok')}
+                      disabled={actionLoading.startsWith('rescrape')}
+                      className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+                    >
+                      {actionLoading === 'rescrape-tiktok' ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <PlayIcon className="h-4 w-4 mr-2" />
+                      )}
+                      TikTok Only
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

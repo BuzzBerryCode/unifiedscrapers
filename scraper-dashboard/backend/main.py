@@ -120,6 +120,9 @@ def start_job_directly(job_id: str, job_type: str):
             elif job_type == "rescrape_all":
                 from tasks import rescrape_all_creators
                 rescrape_all_creators(job_id)
+            elif job_type == "daily_rescrape":
+                from tasks import rescrape_all_creators
+                rescrape_all_creators(job_id)  # Use same function, it handles auto-rescrape data
             else:
                 print(f"❌ Unknown job type: {job_type}")
                 return
@@ -991,6 +994,110 @@ async def start_auto_rescrape(request: dict, current_user: str = Depends(verify_
         
     except Exception as e:
         print(f"Start auto-rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/schedule-daily")
+async def schedule_daily_rescraping(current_user: str = Depends(verify_token)):
+    """Schedule a daily rescraping job for creators due today"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Get creators that were last updated exactly 7 days ago (due today)
+        seven_days_ago_start = (datetime.utcnow() - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
+        
+        # Find creators due for rescraping today
+        due_creators = supabase.table("creatordata").select("id", "handle", "platform").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
+        
+        if not due_creators.data:
+            return {"message": "No creators due for rescraping today", "job_id": None, "creators_count": 0}
+        
+        # Create daily rescraping job
+        job_id = str(uuid.uuid4())
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": "daily_rescrape",
+            "status": initial_status,
+            "total_items": len(due_creators.data),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Daily rescrape - {len(due_creators.data)} creators due today ({seven_days_ago_start.strftime('%Y-%m-%d')})"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        print(f"✅ Daily rescrape job {job_id} created for {len(due_creators.data)} creators")
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        if redis_client:
+            creator_data = [{"id": c["id"], "handle": c["handle"], "platform": c["platform"]} for c in due_creators.data]
+            redis_client.setex(f"rescrape_data:{job_id}", 86400, json.dumps(creator_data))
+        
+        # Start job if no others are running
+        if not running_jobs:
+            start_next_queued_job()
+        
+        return {
+            "message": f"Daily rescrape job scheduled for {len(due_creators.data)} creators",
+            "job_id": job_id,
+            "status": initial_status,
+            "creators_count": len(due_creators.data),
+            "due_date": seven_days_ago_start.strftime('%Y-%m-%d')
+        }
+        
+    except Exception as e:
+        print(f"Schedule daily rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rescraping/daily-stats")
+async def get_daily_rescraping_stats(current_user: str = Depends(verify_token)):
+    """Get statistics for daily rescraping schedule"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Get daily breakdown for next 7 days
+        daily_stats = []
+        for i in range(7):
+            target_date = datetime.utcnow() - timedelta(days=7-i)
+            start_date = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_date = start_date + timedelta(days=1)
+            
+            # Count creators that will be due on this day
+            due_count = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_date.isoformat()).lt("updated_at", end_date.isoformat()).execute()
+            
+            # Count by platform
+            instagram_count = supabase.table("creatordata").select("id", count="exact").eq("platform", "instagram").gte("updated_at", start_date.isoformat()).lt("updated_at", end_date.isoformat()).execute()
+            tiktok_count = supabase.table("creatordata").select("id", count="exact").eq("platform", "tiktok").gte("updated_at", start_date.isoformat()).lt("updated_at", end_date.isoformat()).execute()
+            
+            daily_stats.append({
+                "date": (datetime.utcnow() + timedelta(days=i)).strftime('%Y-%m-%d'),
+                "day_name": (datetime.utcnow() + timedelta(days=i)).strftime('%A'),
+                "creators_due": due_count.count,
+                "instagram_count": instagram_count.count,
+                "tiktok_count": tiktok_count.count,
+                "is_today": i == 0
+            })
+        
+        return {"daily_schedule": daily_stats}
+        
+    except Exception as e:
+        print(f"Daily stats error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

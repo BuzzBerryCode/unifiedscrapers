@@ -354,17 +354,43 @@ export default function Dashboard() {
       }`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-3">
-        <Image
-                src="/Buzzberry profile picture rounded corners-256x256.png" 
-                alt="BuzzBerry Logo" 
-                width={32} 
-                height={32} 
-                className="rounded-lg"
-              />
-              <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                Scraper Dashboard
-              </h1>
+            <div className="flex items-center space-x-8">
+              <div className="flex items-center space-x-3">
+                <Image
+                  src="/Buzzberry profile picture rounded corners-256x256.png" 
+                  alt="BuzzBerry Logo" 
+                  width={32} 
+                  height={32} 
+                  className="rounded-lg"
+                />
+                <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  Scraper Dashboard
+                </h1>
+              </div>
+              
+              {/* Navigation */}
+              <nav className="flex items-center space-x-6">
+                <a
+                  href="/"
+                  className={`text-sm font-medium transition-colors ${
+                    darkMode 
+                      ? 'text-white hover:text-gray-300' 
+                      : 'text-gray-900 hover:text-gray-600'
+                  }`}
+                >
+                  Dashboard
+                </a>
+                <a
+                  href="/rescraping"
+                  className={`text-sm font-medium transition-colors ${
+                    darkMode 
+                      ? 'text-gray-300 hover:text-white' 
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  Rescraping
+                </a>
+              </nav>
             </div>
             <div className="flex items-center space-x-4">
               <button

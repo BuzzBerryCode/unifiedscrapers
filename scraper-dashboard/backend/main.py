@@ -780,6 +780,220 @@ async def emergency_cleanup(current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# ==================== RESCRAPING MANAGEMENT ====================
+
+@app.get("/rescraping/stats")
+async def get_rescraping_stats(current_user: str = Depends(verify_token)):
+    """Get rescraping statistics and schedule"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Get total creators
+        total_response = supabase.table("creatordata").select("id", count="exact").execute()
+        total_creators = total_response.count
+        
+        # Get creators with no updated_at (need initial dates)
+        null_updated_response = supabase.table("creatordata").select("id", count="exact").is_("updated_at", "null").execute()
+        creators_need_dates = null_updated_response.count
+        
+        # Get creators due for rescraping (updated > 7 days ago)
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        due_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago).execute()
+        creators_due = due_response.count
+        
+        # Get creators by day of week for next 7 days
+        schedule = {}
+        for i in range(7):
+            date = datetime.utcnow() + timedelta(days=i)
+            day_name = date.strftime("%A")
+            
+            # Calculate how many creators would be due on this day
+            # This is a rough estimate based on spreading creators evenly
+            creators_for_day = (creators_due + creators_need_dates) // 7
+            if i < (creators_due + creators_need_dates) % 7:
+                creators_for_day += 1
+                
+            schedule[day_name] = {
+                "date": date.strftime("%Y-%m-%d"),
+                "day": day_name,
+                "estimated_creators": creators_for_day
+            }
+        
+        # Get recent rescraping jobs
+        recent_jobs = supabase.table("scraper_jobs").select("*").in_("job_type", ["rescrape_all", "rescrape_instagram", "rescrape_tiktok"]).order("created_at", desc=True).limit(10).execute()
+        
+        return {
+            "total_creators": total_creators,
+            "creators_need_dates": creators_need_dates,
+            "creators_due_rescrape": creators_due,
+            "weekly_schedule": schedule,
+            "recent_jobs": recent_jobs.data
+        }
+        
+    except Exception as e:
+        print(f"Rescraping stats error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/populate-dates")
+async def populate_updated_dates(current_user: str = Depends(verify_token)):
+    """Populate null updated_at dates spread across the past week"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        import random
+        
+        # Get creators with null updated_at
+        null_creators = supabase.table("creatordata").select("id").is_("updated_at", "null").execute()
+        
+        if not null_creators.data:
+            return {"message": "No creators need date population", "updated_count": 0}
+        
+        print(f"📅 Populating dates for {len(null_creators.data)} creators")
+        
+        updated_count = 0
+        base_date = datetime.utcnow() - timedelta(days=7)  # Start from 7 days ago
+        
+        for i, creator in enumerate(null_creators.data):
+            # Spread creators across 7 days
+            days_offset = i % 7
+            hours_offset = random.randint(0, 23)
+            minutes_offset = random.randint(0, 59)
+            
+            updated_date = base_date + timedelta(
+                days=days_offset,
+                hours=hours_offset,
+                minutes=minutes_offset
+            )
+            
+            # Update the creator's updated_at date
+            supabase.table("creatordata").update({
+                "updated_at": updated_date.isoformat()
+            }).eq("id", creator["id"]).execute()
+            
+            updated_count += 1
+            
+            # Progress update every 100 creators
+            if updated_count % 100 == 0:
+                print(f"📅 Updated {updated_count}/{len(null_creators.data)} creators")
+        
+        print(f"✅ Completed populating dates for {updated_count} creators")
+        return {"message": f"Successfully populated dates for {updated_count} creators", "updated_count": updated_count}
+        
+    except Exception as e:
+        print(f"Populate dates error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rescraping/due-creators")
+async def get_due_creators(current_user: str = Depends(verify_token)):
+    """Get creators due for rescraping (>7 days old)"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        # Get creators due for rescraping
+        due_creators = supabase.table("creatordata").select("id", "handle", "platform", "updated_at", "primary_niche").lt("updated_at", seven_days_ago).order("updated_at").limit(100).execute()
+        
+        return {
+            "creators_due": due_creators.data,
+            "total_due": len(due_creators.data)
+        }
+        
+    except Exception as e:
+        print(f"Due creators error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/start-auto-rescrape")
+async def start_auto_rescrape(request: dict, current_user: str = Depends(verify_token)):
+    """Start automatic rescraping of due creators"""
+    try:
+        platform = request.get("platform", "all")  # all, instagram, tiktok
+        max_creators = request.get("max_creators", 100)  # Limit per job
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        # Build query based on platform
+        query = supabase.table("creatordata").select("id", "handle", "platform")
+        
+        if platform == "instagram":
+            query = query.eq("platform", "instagram")
+        elif platform == "tiktok":
+            query = query.eq("platform", "tiktok")
+        # For "all", no additional filter needed
+        
+        due_creators = query.lt("updated_at", seven_days_ago).order("updated_at").limit(max_creators).execute()
+        
+        if not due_creators.data:
+            return {"message": "No creators due for rescraping", "job_id": None}
+        
+        # Create rescraping job
+        job_id = str(uuid.uuid4())
+        job_type_map = {
+            "all": "rescrape_all",
+            "instagram": "rescrape_instagram", 
+            "tiktok": "rescrape_tiktok"
+        }
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": job_type_map[platform],
+            "status": initial_status,
+            "total_items": len(due_creators.data),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Auto-rescrape {len(due_creators.data)} {platform} creators (7+ days old)"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        print(f"✅ Auto-rescrape job {job_id} created for {len(due_creators.data)} creators")
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        if redis_client:
+            creator_data = [{"id": c["id"], "handle": c["handle"], "platform": c["platform"]} for c in due_creators.data]
+            redis_client.setex(f"rescrape_data:{job_id}", 86400, json.dumps(creator_data))
+        
+        # Start job if no others are running
+        if not running_jobs:
+            start_next_queued_job()
+        
+        return {
+            "message": f"Auto-rescrape job started for {len(due_creators.data)} creators",
+            "job_id": job_id,
+            "status": initial_status,
+            "creators_count": len(due_creators.data)
+        }
+        
+    except Exception as e:
+        print(f"Start auto-rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== STARTUP EVENT ====================
 
 @app.on_event("startup")

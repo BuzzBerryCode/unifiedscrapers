@@ -381,8 +381,23 @@ def rescrape_all_creators(job_id: str):
         print(f"Starting job {job_id}: rescrape_all_creators")
         update_job_status(job_id, "running")
         
-        # Get all creators
-        existing_creators = get_existing_creators()
+        # Check if this is an auto-rescrape job with specific creator list
+        auto_rescrape_data = None
+        try:
+            auto_rescrape_json = redis_client.get(f"rescrape_data:{job_id}")
+            if auto_rescrape_json:
+                auto_rescrape_data = json.loads(auto_rescrape_json)
+                print(f"🔄 Auto-rescrape job: {len(auto_rescrape_data)} specific creators")
+        except Exception as e:
+            print(f"⚠️ Failed to load auto-rescrape data: {e}")
+        
+        if auto_rescrape_data:
+            # Auto-rescrape specific creators
+            existing_creators = auto_rescrape_data
+        else:
+            # Get all creators (legacy behavior)
+            existing_creators = get_existing_creators()
+            
         total_items = len(existing_creators)
         processed_items = 0
         failed_items = 0

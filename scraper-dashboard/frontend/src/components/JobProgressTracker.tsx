@@ -90,6 +90,16 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
     return colors[errorType] || colors['Unknown'];
   };
 
+  const getJobTypeDisplay = (jobType: string): string => {
+    switch (jobType) {
+      case 'new_creators': return 'New Creators';
+      case 'rescrape_all': return 'Rescrape All';
+      case 'rescrape_instagram': return 'Rescrape Instagram';
+      case 'rescrape_tiktok': return 'Rescrape TikTok';
+      default: return jobType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  };
+
   return (
     <div className={`border-2 rounded-lg p-4 mb-4 ${getStatusColor()}`}>
       {/* Header */}
@@ -98,7 +108,7 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
           {getStatusIcon()}
           <div>
             <h3 className={`font-semibold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              {job.description}
+              {getJobTypeDisplay(job.job_type)} - {totalItems} creators
             </h3>
             <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
               Started: {formatTime(job.created_at)}

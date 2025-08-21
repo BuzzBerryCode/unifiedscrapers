@@ -70,6 +70,16 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
     return Math.round((job.processed_items || 0) / job.total_items * 100)
   }
 
+  const getJobTypeDisplay = (jobType: string): string => {
+    switch (jobType) {
+      case 'new_creators': return 'New Creators';
+      case 'rescrape_all': return 'Rescrape All';
+      case 'rescrape_instagram': return 'Rescrape Instagram';
+      case 'rescrape_tiktok': return 'Rescrape TikTok';
+      default: return jobType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }
+
   const getEstimatedTimeRemaining = (job: Job) => {
     if (job.status !== 'running' || !job.total_items || !job.processed_items) return null
     
@@ -175,7 +185,7 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
                         <div className={`text-sm max-w-xs truncate ${
                           darkMode ? 'text-gray-400' : 'text-gray-500'
                         }`}>
-                          {job.description}
+                          {job.total_items} creators • {new Date(job.created_at).toLocaleDateString()}
                         </div>
                       </div>
                     </div>
@@ -348,8 +358,10 @@ export default function JobsTable({ jobs, onCancelJob, onRemoveJob, darkMode = f
               </div>
               
               <div>
-                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Description</label>
-                <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{selectedJob.description}</p>
+                <label className={`block text-sm font-medium ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>Job Details</label>
+                <p className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>
+                  {getJobTypeDisplay(selectedJob.job_type)} • {selectedJob.total_items} creators
+                </p>
               </div>
               
               <div className="grid grid-cols-2 gap-4">

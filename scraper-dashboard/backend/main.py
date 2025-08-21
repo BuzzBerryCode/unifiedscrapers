@@ -803,10 +803,13 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
         null_updated_response = supabase.table("creatordata").select("id", count="exact").is_("updated_at", "null").execute()
         creators_need_dates = null_updated_response.count
         
-        # Get creators due for rescraping (updated > 7 days ago)
+        # Get creators due for rescraping (updated > 7 days ago OR null updated_at)
         seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
         due_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago).execute()
-        creators_due = due_response.count
+        creators_due = due_response.count + creators_need_dates  # Include creators with null dates
+        
+        # Set daily rescraping time to 9:00 AM UTC
+        DAILY_RESCRAPE_HOUR = 9
         
         # Get creators by day of week for next 7 days based on actual updated_at dates
         schedule = {}
@@ -822,11 +825,20 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
             # Count creators that were updated on that day (and thus due for rescraping on target_date)
             creators_due_count = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_of_day.isoformat()).lt("updated_at", end_of_day.isoformat()).execute()
             
+            # Add creators with null dates if this is today (they need immediate attention)
+            if i == 0:
+                creators_due_count.count += creators_need_dates
+            
+            # Set scheduled time for daily rescrape
+            scheduled_time = target_date.replace(hour=DAILY_RESCRAPE_HOUR, minute=0, second=0, microsecond=0)
+            
             schedule[day_name] = {
                 "date": target_date.strftime("%Y-%m-%d"),
                 "day": day_name,
                 "estimated_creators": creators_due_count.count,
-                "is_today": i == 0
+                "scheduled_time": scheduled_time.strftime("%H:%M UTC"),
+                "is_today": i == 0,
+                "is_past_time": datetime.utcnow() > scheduled_time if i == 0 else False
             }
         
         # Get recent rescraping jobs (including daily jobs)
@@ -1004,60 +1016,34 @@ async def start_auto_rescrape(request: dict, current_user: str = Depends(verify_
 async def schedule_daily_rescraping(current_user: str = Depends(verify_token)):
     """Schedule a daily rescraping job for creators due today"""
     try:
+        # Use the same logic as the automatic daily scheduler
+        create_daily_rescraping_job()
+        
+        # Return status
         supabase = get_supabase_client()
         if not supabase:
             raise HTTPException(status_code=500, detail="Database connection failed")
         
-        from datetime import datetime, timedelta
+        from datetime import datetime
+        today_str = datetime.utcnow().strftime('%Y-%m-%d')
+        today_job = supabase.table("scraper_jobs").select("*").eq("job_type", "daily_rescrape").gte("created_at", f"{today_str}T00:00:00").lt("created_at", f"{today_str}T23:59:59").execute()
         
-        # Get creators that were last updated exactly 7 days ago (due today)
-        seven_days_ago_start = (datetime.utcnow() - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
-        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
-        
-        # Find creators due for rescraping today
-        due_creators = supabase.table("creatordata").select("id", "handle", "platform").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
-        
-        if not due_creators.data:
-            return {"message": "No creators due for rescraping today", "job_id": None, "creators_count": 0}
-        
-        # Create daily rescraping job
-        job_id = str(uuid.uuid4())
-        
-        # Check if there are running jobs
-        running_jobs = check_running_jobs()
-        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
-        
-        job_data = {
-            "id": job_id,
-            "job_type": "daily_rescrape",
-            "status": initial_status,
-            "total_items": len(due_creators.data),
-            "processed_items": 0,
-            "created_at": datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "description": f"Daily rescrape - {len(due_creators.data)} creators due today ({seven_days_ago_start.strftime('%Y-%m-%d')})"
-        }
-        
-        supabase.table("scraper_jobs").insert(job_data).execute()
-        print(f"✅ Daily rescrape job {job_id} created for {len(due_creators.data)} creators")
-        
-        # Store creator list in Redis
-        redis_client = get_redis_client()
-        if redis_client:
-            creator_data = [{"id": c["id"], "handle": c["handle"], "platform": c["platform"]} for c in due_creators.data]
-            redis_client.setex(f"rescrape_data:{job_id}", 86400, json.dumps(creator_data))
-        
-        # Start job if no others are running
-        if not running_jobs:
-            start_next_queued_job()
-        
-        return {
-            "message": f"Daily rescrape job scheduled for {len(due_creators.data)} creators",
-            "job_id": job_id,
-            "status": initial_status,
-            "creators_count": len(due_creators.data),
-            "due_date": seven_days_ago_start.strftime('%Y-%m-%d')
-        }
+        if today_job.data:
+            job = today_job.data[0]
+            return {
+                "message": f"Daily rescrape job created for {job['total_items']} creators",
+                "job_id": job["id"],
+                "status": job["status"],
+                "creators_count": job["total_items"],
+                "due_date": today_str
+            }
+        else:
+            return {
+                "message": "No creators due for rescraping today",
+                "job_id": None,
+                "creators_count": 0,
+                "due_date": today_str
+            }
         
     except Exception as e:
         print(f"Schedule daily rescrape error: {e}")
@@ -1165,6 +1151,16 @@ async def startup_event():
             print(f"⚠️ Background job monitor failed to start: {monitor_error}")
             # Don't fail startup if monitor fails
         
+        # Start daily scheduler
+        try:
+            scheduler_thread = threading.Thread(target=run_daily_scheduler)
+            scheduler_thread.daemon = True
+            scheduler_thread.start()
+            print("✅ Daily scheduler started")
+        except Exception as scheduler_error:
+            print(f"⚠️ Daily scheduler failed to start: {scheduler_error}")
+            # Don't fail startup if scheduler fails
+        
         print("✅ Scraper Dashboard API started")
         
     except Exception as e:
@@ -1187,6 +1183,96 @@ def signal_handler(signum, frame):
 # Register signal handlers
 signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
+
+def create_daily_rescraping_job():
+    """Create a daily rescraping job if creators are due today"""
+    try:
+        print("⏰ Checking for daily rescraping job...")
+        supabase = get_supabase_client()
+        if not supabase:
+            print("❌ Database connection failed for daily job creation")
+            return
+            
+        from datetime import datetime, timedelta
+        
+        # Get creators that were last updated exactly 7 days ago (due today)
+        seven_days_ago_start = (datetime.utcnow() - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
+        
+        # Find creators due for rescraping today + creators with null dates
+        due_creators = supabase.table("creatordata").select("id", "handle", "platform").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
+        null_creators = supabase.table("creatordata").select("id", "handle", "platform").is_("updated_at", "null").execute()
+        
+        all_due_creators = due_creators.data + null_creators.data
+        
+        if not all_due_creators:
+            print("✅ No creators due for rescraping today")
+            return
+        
+        # Check if a daily job already exists for today
+        today_str = datetime.utcnow().strftime('%Y-%m-%d')
+        existing_job = supabase.table("scraper_jobs").select("id").eq("job_type", "daily_rescrape").gte("created_at", f"{today_str}T00:00:00").lt("created_at", f"{today_str}T23:59:59").execute()
+        
+        if existing_job.data:
+            print(f"✅ Daily rescraping job already exists for {today_str}")
+            return
+            
+        # Create daily rescraping job
+        job_id = str(uuid.uuid4())
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": "daily_rescrape",
+            "status": initial_status,
+            "total_items": len(all_due_creators),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Daily rescrape - {len(all_due_creators)} creators due ({today_str})"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        print(f"✅ Created daily rescraping job {job_id} for {len(all_due_creators)} creators")
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        if redis_client:
+            creator_data = [{"id": c["id"], "handle": c["handle"], "platform": c["platform"]} for c in all_due_creators]
+            redis_client.setex(f"rescrape_data:{job_id}", 86400, json.dumps(creator_data))
+        
+        # Start job if no others are running
+        if not running_jobs:
+            start_next_queued_job()
+            
+    except Exception as e:
+        print(f"❌ Failed to create daily rescraping job: {e}")
+        traceback.print_exc()
+
+def run_daily_scheduler():
+    """Run a simple daily scheduler in a separate thread"""
+    print("📅 Starting daily job scheduler...")
+    
+    while True:
+        try:
+            now = datetime.utcnow()
+            # Check if it's 9:00 AM UTC and we haven't created a job today yet
+            if now.hour == 9 and now.minute == 0:
+                create_daily_rescraping_job()
+                # Sleep for 2 minutes to avoid creating multiple jobs in the same minute
+                time.sleep(120)
+            else:
+                # Check every minute
+                time.sleep(60)
+        except KeyboardInterrupt:
+            print("🛑 Daily scheduler shutting down...")
+            break
+        except Exception as e:
+            print(f"❌ Daily scheduler error: {e}")
+            time.sleep(60)
 
 if __name__ == "__main__":
     import uvicorn

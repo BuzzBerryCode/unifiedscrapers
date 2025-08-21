@@ -20,7 +20,7 @@ interface RescrapeStats {
   total_creators: number
   creators_need_dates: number
   creators_due_rescrape: number
-  weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number; is_today?: boolean } }
+  weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number; scheduled_time: string; is_today?: boolean; is_past_time?: boolean } }
   recent_jobs: Array<{
     id: string
     job_type: string
@@ -348,7 +348,7 @@ export default function RescrapeManagement() {
               <ChartBarIcon className="h-8 w-8 text-green-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Weekly Average
+                  Daily Average
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                   {Math.round(((stats?.creators_due_rescrape || 0) + (stats?.creators_need_dates || 0)) / 7)}
@@ -383,7 +383,14 @@ export default function RescrapeManagement() {
                       )}
                     </div>
                     <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {day.date} • {day.estimated_creators > 0 ? `${day.estimated_creators} creators due` : 'No creators due'}
+                      {day.date} • Scheduled at {day.scheduled_time}
+                      <br />
+                      {day.estimated_creators > 0 ? `${day.estimated_creators} creators due` : 'No creators due'}
+                      {day.is_today && day.is_past_time && (
+                        <span className="ml-2 text-xs px-2 py-1 rounded-full bg-orange-600 text-white">
+                          OVERDUE
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center">

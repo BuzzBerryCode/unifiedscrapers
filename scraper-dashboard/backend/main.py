@@ -240,7 +240,23 @@ def job_monitor():
     
     while True:
         try:
-            start_next_queued_job()
+            # More aggressive queue checking to break phantom loops
+            running_count = 0
+            try:
+                supabase = get_supabase_client()
+                if supabase:
+                    running_jobs = supabase.table("scraper_jobs").select("id").eq("status", JobStatus.RUNNING).execute()
+                    running_count = len(running_jobs.data)
+            except Exception as check_error:
+                print(f"⚠️ Job monitor: Failed to check running jobs: {check_error}")
+            
+            if running_count == 0:
+                # No running jobs, try to start next
+                start_next_queued_job()
+            else:
+                # Jobs are running, just monitor
+                pass
+                
             time.sleep(10)  # Check every 10 seconds
         except KeyboardInterrupt:
             print("🛑 Job monitor shutting down...")
@@ -780,6 +796,40 @@ async def startup_event():
         
         print(f"📊 Supabase connection: {'✅' if supabase_ok else '❌'}")
         print(f"🔗 Redis connection: {'✅' if redis_ok else '❌'}")
+        
+        # CRITICAL: Clean up orphaned jobs on startup
+        try:
+            print("🧹 Cleaning up orphaned jobs from previous sessions...")
+            supabase = get_supabase_client()
+            if supabase:
+                # Mark all "running" jobs as failed since they can't survive restarts
+                orphaned_jobs = supabase.table("scraper_jobs").select("id", "job_type").eq("status", JobStatus.RUNNING).execute()
+                
+                if orphaned_jobs.data:
+                    print(f"🧹 Found {len(orphaned_jobs.data)} orphaned running jobs")
+                    for job in orphaned_jobs.data:
+                        job_id = job["id"]
+                        print(f"🧹 Marking orphaned job {job_id} as failed")
+                        supabase.table("scraper_jobs").update({
+                            "status": JobStatus.FAILED,
+                            "error_message": "Service restarted - job orphaned",
+                            "updated_at": datetime.utcnow().isoformat()
+                        }).eq("id", job_id).execute()
+                        
+                        # Clean up Redis data
+                        redis_client = get_redis_client()
+                        if redis_client:
+                            try:
+                                redis_client.delete(f"checkpoint:{job_id}")
+                                redis_client.delete(f"csv_data:{job_id}")
+                            except:
+                                pass
+                    
+                    print(f"✅ Cleaned up {len(orphaned_jobs.data)} orphaned jobs")
+                else:
+                    print("✅ No orphaned jobs found")
+        except Exception as cleanup_error:
+            print(f"⚠️ Startup cleanup failed: {cleanup_error}")
         
         # Start background job monitor
         try:

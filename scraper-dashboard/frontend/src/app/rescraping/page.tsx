@@ -131,6 +131,34 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleDebugData = async () => {
+    setActionLoading('debug')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/debug`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        const debugData = await response.json()
+        console.log('🔍 Debug Data:', debugData)
+        toast.success('Debug data logged to console (F12)')
+        
+        // Also show a summary in a toast
+        const summary = `Total: ${debugData.total_creators}, Null dates: ${debugData.null_updated_at}, Due: ${debugData.older_than_7_days}`
+        toast.success(summary)
+      } else {
+        throw new Error('Failed to get debug data')
+      }
+    } catch (error) {
+      console.error('Debug error:', error)
+      toast.error('Failed to get debug data')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const handleStartRescrape = async (platform: string) => {
     setActionLoading(`rescrape-${platform}`)
     try {
@@ -508,6 +536,28 @@ export default function RescrapeManagement() {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* Debug Data */}
+              <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>
+                <h3 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  Debug Database
+                </h3>
+                <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  Check the current state of creator dates in the database.
+                </p>
+                <button
+                  onClick={handleDebugData}
+                  disabled={actionLoading === 'debug'}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                >
+                  {actionLoading === 'debug' ? (
+                    <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <Cog6ToothIcon className="h-4 w-4 mr-2" />
+                  )}
+                  Debug Data
+                </button>
               </div>
             </div>
           </div>

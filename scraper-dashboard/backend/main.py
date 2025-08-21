@@ -877,30 +877,40 @@ async def populate_updated_dates(current_user: str = Depends(verify_token)):
         print(f"📅 Populating dates for {len(null_creators.data)} creators")
         
         updated_count = 0
-        base_date = datetime.utcnow() - timedelta(days=7)  # Start from 7 days ago
+        base_date = datetime.utcnow() - timedelta(days=14)  # Start from 14 days ago for better spread
         
-        for i, creator in enumerate(null_creators.data):
-            # Spread creators across 7 days
-            days_offset = i % 7
-            hours_offset = random.randint(0, 23)
-            minutes_offset = random.randint(0, 59)
+        # Batch update for better performance
+        batch_size = 50
+        for batch_start in range(0, len(null_creators.data), batch_size):
+            batch_end = min(batch_start + batch_size, len(null_creators.data))
+            batch = null_creators.data[batch_start:batch_end]
             
-            updated_date = base_date + timedelta(
-                days=days_offset,
-                hours=hours_offset,
-                minutes=minutes_offset
-            )
+            for i, creator in enumerate(batch):
+                # Spread creators across 14 days for better distribution
+                global_index = batch_start + i
+                days_offset = global_index % 14
+                hours_offset = random.randint(0, 23)
+                minutes_offset = random.randint(0, 59)
+                seconds_offset = random.randint(0, 59)
+                
+                updated_date = base_date + timedelta(
+                    days=days_offset,
+                    hours=hours_offset,
+                    minutes=minutes_offset,
+                    seconds=seconds_offset
+                )
+                
+                # Update the creator's updated_at date
+                try:
+                    supabase.table("creatordata").update({
+                        "updated_at": updated_date.isoformat()
+                    }).eq("id", creator["id"]).execute()
+                    updated_count += 1
+                except Exception as update_error:
+                    print(f"⚠️ Failed to update creator {creator['id']}: {update_error}")
             
-            # Update the creator's updated_at date
-            supabase.table("creatordata").update({
-                "updated_at": updated_date.isoformat()
-            }).eq("id", creator["id"]).execute()
-            
-            updated_count += 1
-            
-            # Progress update every 100 creators
-            if updated_count % 100 == 0:
-                print(f"📅 Updated {updated_count}/{len(null_creators.data)} creators")
+            # Progress update every batch
+            print(f"📅 Updated {updated_count}/{len(null_creators.data)} creators")
         
         print(f"✅ Completed populating dates for {updated_count} creators")
         return {"message": f"Successfully populated dates for {updated_count} creators", "updated_count": updated_count}
@@ -1047,6 +1057,59 @@ async def schedule_daily_rescraping(current_user: str = Depends(verify_token)):
         
     except Exception as e:
         print(f"Schedule daily rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rescraping/debug")
+async def debug_rescraping_data(current_user: str = Depends(verify_token)):
+    """Debug endpoint to check current state of creator updated_at dates"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Get total creators
+        total_response = supabase.table("creatordata").select("id", count="exact").execute()
+        total_creators = total_response.count
+        
+        # Get creators with null updated_at
+        null_response = supabase.table("creatordata").select("id", count="exact").is_("updated_at", "null").execute()
+        null_count = null_response.count
+        
+        # Get creators older than 7 days
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        old_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago).execute()
+        old_count = old_response.count
+        
+        # Get sample of recent updated_at dates
+        recent_sample = supabase.table("creatordata").select("handle", "platform", "updated_at").is_not("updated_at", "null").order("updated_at", desc=False).limit(10).execute()
+        
+        # Get distribution by day for the past 14 days
+        daily_distribution = {}
+        for i in range(14):
+            target_date = datetime.utcnow() - timedelta(days=i)
+            start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = start_of_day + timedelta(days=1)
+            
+            count_response = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_of_day.isoformat()).lt("updated_at", end_of_day.isoformat()).execute()
+            daily_distribution[target_date.strftime('%Y-%m-%d')] = count_response.count
+        
+        return {
+            "total_creators": total_creators,
+            "null_updated_at": null_count,
+            "older_than_7_days": old_count,
+            "recent_sample": recent_sample.data,
+            "daily_distribution_past_14_days": daily_distribution,
+            "debug_info": {
+                "current_time": datetime.utcnow().isoformat(),
+                "seven_days_ago_threshold": seven_days_ago
+            }
+        }
+        
+    except Exception as e:
+        print(f"Debug rescraping error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -385,10 +385,11 @@ async def remove_job(job_id: str, current_user: str = Depends(verify_token)):
             raise HTTPException(status_code=500, detail="Database connection failed")
         
         # First check if the job exists and get its status
-        job_response = supabase.table("scraper_jobs").select("status").eq("id", job_id).execute()
+        job_response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
         
         if not job_response.data:
-            raise HTTPException(status_code=404, detail="Job not found")
+            print(f"❌ Remove failed: Job {job_id} not found in database")
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
         job_status = job_response.data[0]["status"]
         
@@ -431,10 +432,11 @@ async def cancel_job(job_id: str, current_user: str = Depends(verify_token)):
             raise HTTPException(status_code=500, detail="Database connection failed")
         
         # Check if job exists
-        job_response = supabase.table("scraper_jobs").select("status").eq("id", job_id).execute()
+        job_response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
         
         if not job_response.data:
-            raise HTTPException(status_code=404, detail="Job not found")
+            print(f"❌ Cancel failed: Job {job_id} not found in database")
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
         
         job_status = job_response.data[0]["status"]
         
@@ -464,6 +466,59 @@ async def cancel_job(job_id: str, current_user: str = Depends(verify_token)):
         raise
     except Exception as e:
         print(f"Cancel job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/jobs/{job_id}/force-cancel")
+async def force_cancel_job(job_id: str, current_user: str = Depends(verify_token)):
+    """Force cancel any job regardless of status"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Check if job exists
+        job_response = supabase.table("scraper_jobs").select("*").eq("id", job_id).execute()
+        
+        if not job_response.data:
+            print(f"❌ Force cancel failed: Job {job_id} not found in database")
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        
+        job = job_response.data[0]
+        job_status = job["status"]
+        
+        print(f"🔨 Force cancelling job {job_id} (current status: {job_status})")
+        
+        # Update job status to cancelled regardless of current status
+        update_response = supabase.table("scraper_jobs").update({
+            "status": JobStatus.CANCELLED,
+            "updated_at": datetime.utcnow().isoformat(),
+            "error_message": "Force cancelled by user"
+        }).eq("id", job_id).execute()
+        
+        if not update_response.data:
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Clean up any checkpoints
+        redis_client = get_redis_client()
+        if redis_client:
+            try:
+                redis_client.delete(f"checkpoint:{job_id}")
+                redis_client.delete(f"csv_data:{job_id}")
+                print(f"🧹 Cleaned up Redis data for job {job_id}")
+            except Exception as redis_error:
+                print(f"⚠️ Redis cleanup failed: {redis_error}")
+        
+        # Start next queued job if this was running
+        if job_status == JobStatus.RUNNING:
+            start_next_queued_job()
+        
+        return {"message": f"Job {job_id} force cancelled successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Force cancel job error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

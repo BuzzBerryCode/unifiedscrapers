@@ -133,9 +133,9 @@ export default function RescrapeManagement() {
       const token = localStorage.getItem('token')
       
       let endpoint = '/rescraping/start-auto-rescrape'
-      let body = { platform, max_creators: 100 }
+      let body: { platform?: string; max_creators?: number } = { platform, max_creators: 100 }
       
-      // Use daily scheduling for "all" platform
+      // Use daily scheduling for "daily" platform
       if (platform === 'daily') {
         endpoint = '/rescraping/schedule-daily'
         body = {}

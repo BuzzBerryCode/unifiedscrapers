@@ -233,7 +233,7 @@ async def health_check():
         "redis_connected": bool(get_redis_client()),
         "supabase_connected": bool(get_supabase_client()),
         "python_version": sys.version,
-        "deployment_version": "v2.0"
+        "deployment_version": "v2.1"
     }
 
 @app.post("/auth/login")

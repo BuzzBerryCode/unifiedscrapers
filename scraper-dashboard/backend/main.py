@@ -151,7 +151,35 @@ def check_running_jobs():
         if not supabase:
             return False
             
-        response = supabase.table("scraper_jobs").select("id").eq("status", JobStatus.RUNNING).execute()
+        response = supabase.table("scraper_jobs").select("id", "created_at").eq("status", JobStatus.RUNNING).execute()
+        
+        # Clean up phantom jobs (running for more than 4 hours)
+        if response.data:
+            from datetime import datetime, timedelta
+            current_time = datetime.utcnow()
+            phantom_jobs = []
+            
+            for job in response.data:
+                job_created = datetime.fromisoformat(job["created_at"].replace('Z', '+00:00')).replace(tzinfo=None)
+                if current_time - job_created > timedelta(hours=4):
+                    phantom_jobs.append(job["id"])
+            
+            # Mark phantom jobs as failed
+            if phantom_jobs:
+                print(f"🧹 Cleaning up {len(phantom_jobs)} phantom jobs: {phantom_jobs}")
+                for phantom_id in phantom_jobs:
+                    try:
+                        supabase.table("scraper_jobs").update({
+                            "status": JobStatus.FAILED,
+                            "error_message": "Job stuck for >4 hours - marked as failed",
+                            "updated_at": datetime.utcnow().isoformat()
+                        }).eq("id", phantom_id).execute()
+                    except Exception as cleanup_error:
+                        print(f"⚠️ Failed to cleanup phantom job {phantom_id}: {cleanup_error}")
+                
+                # Re-check after cleanup
+                response = supabase.table("scraper_jobs").select("id").eq("status", JobStatus.RUNNING).execute()
+        
         return len(response.data) > 0
     except Exception as e:
         print(f"❌ Error checking running jobs: {e}")
@@ -691,6 +719,48 @@ async def restart_stuck_job(job_id: str, current_user: str = Depends(verify_toke
         raise
     except Exception as e:
         print(f"Restart job error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/jobs/emergency-cleanup")
+async def emergency_cleanup(current_user: str = Depends(verify_token)):
+    """Emergency cleanup of all phantom/stuck jobs"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get all running jobs
+        running_jobs = supabase.table("scraper_jobs").select("*").eq("status", JobStatus.RUNNING).execute()
+        
+        cleanup_count = 0
+        for job in running_jobs.data:
+            job_id = job["id"]
+            print(f"🧹 Emergency cleanup: Marking job {job_id} as failed")
+            
+            # Mark as failed
+            supabase.table("scraper_jobs").update({
+                "status": JobStatus.FAILED,
+                "error_message": "Emergency cleanup - job was stuck",
+                "updated_at": datetime.utcnow().isoformat()
+            }).eq("id", job_id).execute()
+            
+            # Clean up Redis data
+            redis_client = get_redis_client()
+            if redis_client:
+                try:
+                    redis_client.delete(f"checkpoint:{job_id}")
+                    redis_client.delete(f"csv_data:{job_id}")
+                except Exception as redis_error:
+                    print(f"⚠️ Redis cleanup failed for {job_id}: {redis_error}")
+            
+            cleanup_count += 1
+        
+        print(f"✅ Emergency cleanup complete: {cleanup_count} jobs cleaned up")
+        return {"message": f"Emergency cleanup complete: {cleanup_count} jobs cleaned up"}
+        
+    except Exception as e:
+        print(f"Emergency cleanup error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

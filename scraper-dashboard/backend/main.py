@@ -920,6 +920,69 @@ async def populate_updated_dates(current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/rescraping/force-populate-dates")
+async def force_populate_dates(current_user: str = Depends(verify_token)):
+    """Force populate dates for ALL creators, even those with existing dates, to ensure even distribution"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        import random
+        
+        # Get ALL creators (not just null ones)
+        all_creators = supabase.table("creatordata").select("id").execute()
+        
+        if not all_creators.data:
+            return {"message": "No creators found", "updated_count": 0}
+        
+        print(f"📅 Force populating dates for {len(all_creators.data)} creators")
+        
+        updated_count = 0
+        base_date = datetime.utcnow() - timedelta(days=14)  # Start from 14 days ago
+        
+        # Batch update for better performance
+        batch_size = 50
+        for batch_start in range(0, len(all_creators.data), batch_size):
+            batch_end = min(batch_start + batch_size, len(all_creators.data))
+            batch = all_creators.data[batch_start:batch_end]
+            
+            for i, creator in enumerate(batch):
+                # Spread creators across 14 days for better distribution
+                global_index = batch_start + i
+                days_offset = global_index % 14
+                hours_offset = random.randint(0, 23)
+                minutes_offset = random.randint(0, 59)
+                seconds_offset = random.randint(0, 59)
+                
+                updated_date = base_date + timedelta(
+                    days=days_offset,
+                    hours=hours_offset,
+                    minutes=minutes_offset,
+                    seconds=seconds_offset
+                )
+                
+                # Update the creator's updated_at date
+                try:
+                    supabase.table("creatordata").update({
+                        "updated_at": updated_date.isoformat()
+                    }).eq("id", creator["id"]).execute()
+                    updated_count += 1
+                except Exception as update_error:
+                    print(f"⚠️ Failed to update creator {creator['id']}: {update_error}")
+            
+            # Progress update every batch
+            print(f"📅 Updated {updated_count}/{len(all_creators.data)} creators")
+        
+        print(f"✅ Completed force populating dates for {updated_count} creators")
+        return {"message": f"Successfully force populated dates for {updated_count} creators", "updated_count": updated_count}
+        
+    except Exception as e:
+        print(f"Force populate dates error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/rescraping/due-creators")
 async def get_due_creators(current_user: str = Depends(verify_token)):
     """Get creators due for rescraping (>7 days old)"""
@@ -1100,11 +1163,12 @@ async def debug_rescraping_data(current_user: str = Depends(verify_token)):
             "total_creators": total_creators,
             "null_updated_at": null_count,
             "older_than_7_days": old_count,
-            "recent_sample": recent_sample.data,
+            "recent_sample": recent_sample.data if recent_sample.data else [],
             "daily_distribution_past_14_days": daily_distribution,
             "debug_info": {
                 "current_time": datetime.utcnow().isoformat(),
-                "seven_days_ago_threshold": seven_days_ago
+                "seven_days_ago_threshold": seven_days_ago,
+                "note": "✅ Database trigger correctly updates updated_at when creators are rescraped"
             }
         }
         

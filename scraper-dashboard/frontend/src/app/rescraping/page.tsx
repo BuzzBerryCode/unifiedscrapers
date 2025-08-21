@@ -131,6 +131,33 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleForcePopulateDates = async () => {
+    if (!confirm('This will reset ALL creator dates to ensure even distribution. This may take a few minutes. Continue?')) return
+    
+    setActionLoading('force-populate')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/force-populate-dates`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        fetchData() // Refresh the data
+      } else {
+        throw new Error('Failed to force populate dates')
+      }
+    } catch (error) {
+      console.error('Force populate error:', error)
+      toast.error('Failed to force populate dates')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const handleDebugData = async () => {
     setActionLoading('debug')
     try {
@@ -541,23 +568,37 @@ export default function RescrapeManagement() {
               {/* Debug Data */}
               <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>
                 <h3 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  Debug Database
+                  Debug & Fix Tools
                 </h3>
                 <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Check the current state of creator dates in the database.
+                  Debug database state and fix distribution issues.
                 </p>
-                <button
-                  onClick={handleDebugData}
-                  disabled={actionLoading === 'debug'}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
-                >
-                  {actionLoading === 'debug' ? (
-                    <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <Cog6ToothIcon className="h-4 w-4 mr-2" />
-                  )}
-                  Debug Data
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={handleDebugData}
+                    disabled={actionLoading === 'debug'}
+                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'debug' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Cog6ToothIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Debug Data
+                  </button>
+                  <button
+                    onClick={handleForcePopulateDates}
+                    disabled={actionLoading === 'force-populate'}
+                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'force-populate' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <CalendarIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Force Redistribute All Dates
+                  </button>
+                </div>
               </div>
             </div>
           </div>

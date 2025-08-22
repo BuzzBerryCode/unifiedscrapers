@@ -158,6 +158,34 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleTestDistribution = async () => {
+    setActionLoading('test-distribution')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/test-distribution`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        const testData = await response.json()
+        console.log('📊 Distribution Test:', testData)
+        toast.success('Distribution test logged to console (F12)')
+        
+        // Show a summary
+        const dueToday = Object.values(testData.creators_due_next_7_days)[0] as number
+        toast.success(`Due today: ${dueToday} creators. Check console for full breakdown.`)
+      } else {
+        throw new Error('Failed to test distribution')
+      }
+    } catch (error) {
+      console.error('Test distribution error:', error)
+      toast.error('Failed to test distribution')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const handleDebugData = async () => {
     setActionLoading('debug')
     try {
@@ -585,6 +613,18 @@ export default function RescrapeManagement() {
                       <Cog6ToothIcon className="h-4 w-4 mr-2" />
                     )}
                     Debug Data
+                  </button>
+                  <button
+                    onClick={handleTestDistribution}
+                    disabled={actionLoading === 'test-distribution'}
+                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'test-distribution' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <ChartBarIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Test Distribution
                   </button>
                   <button
                     onClick={handleForcePopulateDates}

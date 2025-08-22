@@ -922,7 +922,7 @@ async def populate_updated_dates(current_user: str = Depends(verify_token)):
 
 @app.post("/rescraping/force-populate-dates")
 async def force_populate_dates(current_user: str = Depends(verify_token)):
-    """Force populate dates for ALL creators, even those with existing dates, to ensure even distribution"""
+    """Force populate dates for ALL creators to ensure even weekly distribution"""
     try:
         supabase = get_supabase_client()
         if not supabase:
@@ -940,18 +940,24 @@ async def force_populate_dates(current_user: str = Depends(verify_token)):
         print(f"📅 Force populating dates for {len(all_creators.data)} creators")
         
         updated_count = 0
-        base_date = datetime.utcnow() - timedelta(days=14)  # Start from 14 days ago
+        total_creators = len(all_creators.data)
+        
+        # Spread across exactly 7 days (not 14) for weekly distribution
+        # Start from 8 days ago to ensure they're all due for rescraping
+        base_date = datetime.utcnow() - timedelta(days=8)
         
         # Batch update for better performance
         batch_size = 50
-        for batch_start in range(0, len(all_creators.data), batch_size):
-            batch_end = min(batch_start + batch_size, len(all_creators.data))
+        for batch_start in range(0, total_creators, batch_size):
+            batch_end = min(batch_start + batch_size, total_creators)
             batch = all_creators.data[batch_start:batch_end]
             
             for i, creator in enumerate(batch):
-                # Spread creators across 14 days for better distribution
+                # Spread creators evenly across 7 days
                 global_index = batch_start + i
-                days_offset = global_index % 14
+                days_offset = global_index % 7  # 0-6 days
+                
+                # Add some randomness within each day to avoid clustering
                 hours_offset = random.randint(0, 23)
                 minutes_offset = random.randint(0, 59)
                 seconds_offset = random.randint(0, 59)
@@ -973,13 +979,70 @@ async def force_populate_dates(current_user: str = Depends(verify_token)):
                     print(f"⚠️ Failed to update creator {creator['id']}: {update_error}")
             
             # Progress update every batch
-            print(f"📅 Updated {updated_count}/{len(all_creators.data)} creators")
+            print(f"📅 Updated {updated_count}/{total_creators} creators")
+        
+        # Calculate expected distribution
+        creators_per_day = total_creators // 7
+        remainder = total_creators % 7
         
         print(f"✅ Completed force populating dates for {updated_count} creators")
-        return {"message": f"Successfully force populated dates for {updated_count} creators", "updated_count": updated_count}
+        print(f"📊 Expected distribution: ~{creators_per_day} creators per day ({remainder} days will have +1 extra)")
+        
+        return {
+            "message": f"Successfully redistributed {updated_count} creators across 7 days", 
+            "updated_count": updated_count,
+            "expected_per_day": creators_per_day,
+            "days_with_extra": remainder
+        }
         
     except Exception as e:
         print(f"Force populate dates error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rescraping/test-distribution")
+async def test_distribution(current_user: str = Depends(verify_token)):
+    """Test the current distribution of creators by updated_at date"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Check distribution for the past 14 days
+        distribution = {}
+        for i in range(14):
+            target_date = datetime.utcnow() - timedelta(days=i)
+            start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = start_of_day + timedelta(days=1)
+            
+            count_response = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_of_day.isoformat()).lt("updated_at", end_of_day.isoformat()).execute()
+            
+            distribution[f"Day {i} ({target_date.strftime('%Y-%m-%d')})"] = count_response.count
+        
+        # Also check how many will be due each day for the next 7 days
+        due_schedule = {}
+        for i in range(7):
+            future_date = datetime.utcnow() + timedelta(days=i)
+            
+            # Creators updated 7 days before this future date will be due
+            seven_days_before = future_date - timedelta(days=7)
+            start_of_day = seven_days_before.replace(hour=0, minute=0, second=0, microsecond=0)
+            end_of_day = start_of_day + timedelta(days=1)
+            
+            count_response = supabase.table("creatordata").select("id", count="exact").gte("updated_at", start_of_day.isoformat()).lt("updated_at", end_of_day.isoformat()).execute()
+            
+            due_schedule[f"{future_date.strftime('%A')} ({future_date.strftime('%Y-%m-%d')})"] = count_response.count
+        
+        return {
+            "current_distribution_past_14_days": distribution,
+            "creators_due_next_7_days": due_schedule,
+            "explanation": "This shows how creators are currently distributed and when they'll be due for rescraping"
+        }
+        
+    except Exception as e:
+        print(f"Test distribution error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

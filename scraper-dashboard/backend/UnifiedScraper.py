@@ -439,32 +439,52 @@ def process_instagram_user(username_input):
     profile_url = f"https://api.scrapecreators.com/v1/instagram/profile?handle={username_input}"
     headers = {"x-api-key": SCRAPECREATORS_API_KEY}
     
-    # Add retry logic with exponential backoff for API calls
-    max_retries = 3
-    retry_delay = 2
+    # Enhanced retry logic with better error handling
+    max_retries = 5  # Increased retries
+    retry_delay = 1
     
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                wait_time = retry_delay * (2 ** (attempt - 1))  # Exponential backoff
+                wait_time = min(retry_delay * (2 ** (attempt - 1)), 30)  # Cap at 30s
                 print(f"   🔄 Retry {attempt + 1}/{max_retries} for @{username_input} after {wait_time}s...")
                 time.sleep(wait_time)
             
-            response = requests.get(profile_url, headers=headers, timeout=30)
+            response = requests.get(profile_url, headers=headers, timeout=45)  # Increased timeout
             
             if response.status_code == 200:
                 break  # Success
             elif response.status_code == 429:
-                print(f"⏳ Rate limited for @{username_input}, waiting longer...")
-                time.sleep(60)  # Wait 1 minute for rate limits
+                print(f"⏳ Rate limited for @{username_input}, waiting 90s...")
+                time.sleep(90)  # Longer wait for rate limits
                 continue
-            elif response.status_code in [500, 502, 503, 504, 520]:
+            elif response.status_code == 404:
+                print(f"👻 Profile not found for @{username_input}")
+                return {"error": "not_found", "message": "Profile not found"}
+            elif response.status_code in [500, 502, 503, 504, 520, 521, 522, 523, 524]:
                 print(f"🔄 Server error {response.status_code} for @{username_input}, retrying...")
+                time.sleep(5)  # Brief pause for server errors
                 continue
+            elif response.status_code == 403:
+                print(f"🔒 Access forbidden for @{username_input} (private/blocked)")
+                return {"error": "access_denied", "message": "Profile is private or access denied"}
             else:
-                print(f"❌ Failed to fetch profile data: {response.status_code}")
-                return {"error": "api_error", "message": f"API error: {response.status_code}"}
+                print(f"❌ Unexpected status code {response.status_code} for @{username_input}")
+                if attempt == max_retries - 1:
+                    return {"error": "api_error", "message": f"API error: {response.status_code}"}
+                continue
                 
+        except requests.exceptions.Timeout:
+            print(f"⏰ Request timeout for @{username_input} (attempt {attempt + 1})")
+            if attempt == max_retries - 1:
+                return {"error": "timeout", "message": "Request timed out after multiple attempts"}
+            continue
+        except requests.exceptions.ConnectionError:
+            print(f"🌐 Connection error for @{username_input} (attempt {attempt + 1})")
+            if attempt == max_retries - 1:
+                return {"error": "connection_error", "message": "Connection failed after multiple attempts"}
+            time.sleep(5)  # Wait before retrying connection errors
+            continue
         except requests.RequestException as e:
             print(f"❌ Profile API request failed (attempt {attempt + 1}): {e}")
             if attempt == max_retries - 1:
@@ -524,29 +544,49 @@ def process_instagram_user(username_input):
     print("\n📡 Fetching post data from ScrapeCreators API...")
     scrapecreators_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username_input}"
     
-    # Add same retry logic for posts API
+    # Enhanced retry logic for posts API
     for attempt in range(max_retries):
         try:
             if attempt > 0:
-                wait_time = retry_delay * (2 ** (attempt - 1))
+                wait_time = min(retry_delay * (2 ** (attempt - 1)), 30)
                 print(f"   🔄 Posts retry {attempt + 1}/{max_retries} for @{username_input} after {wait_time}s...")
                 time.sleep(wait_time)
             
-            posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY}, timeout=30)
+            posts_response = requests.get(scrapecreators_url, headers={"x-api-key": SCRAPECREATORS_API_KEY}, timeout=45)
             
             if posts_response.status_code == 200:
                 break  # Success
             elif posts_response.status_code == 429:
-                print(f"⏳ Rate limited on posts for @{username_input}, waiting longer...")
-                time.sleep(60)
+                print(f"⏳ Rate limited on posts for @{username_input}, waiting 90s...")
+                time.sleep(90)
                 continue
-            elif posts_response.status_code in [500, 502, 503, 504, 520]:
+            elif posts_response.status_code == 404:
+                print(f"👻 No posts found for @{username_input}")
+                return {"error": "no_posts", "message": "No posts found"}
+            elif posts_response.status_code in [500, 502, 503, 504, 520, 521, 522, 523, 524]:
                 print(f"🔄 Posts server error {posts_response.status_code} for @{username_input}, retrying...")
+                time.sleep(5)
                 continue
+            elif posts_response.status_code == 403:
+                print(f"🔒 Posts access forbidden for @{username_input}")
+                return {"error": "access_denied", "message": "Posts access denied"}
             else:
-                print(f"❌ Failed to fetch post data: {posts_response.status_code}")
-                return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
+                print(f"❌ Unexpected posts status code {posts_response.status_code} for @{username_input}")
+                if attempt == max_retries - 1:
+                    return {"error": "api_error", "message": f"Posts API error: {posts_response.status_code}"}
+                continue
                 
+        except requests.exceptions.Timeout:
+            print(f"⏰ Posts request timeout for @{username_input} (attempt {attempt + 1})")
+            if attempt == max_retries - 1:
+                return {"error": "timeout", "message": "Posts request timed out after multiple attempts"}
+            continue
+        except requests.exceptions.ConnectionError:
+            print(f"🌐 Posts connection error for @{username_input} (attempt {attempt + 1})")
+            if attempt == max_retries - 1:
+                return {"error": "connection_error", "message": "Posts connection failed after multiple attempts"}
+            time.sleep(5)
+            continue
         except requests.RequestException as e:
             print(f"❌ Posts API request failed (attempt {attempt + 1}): {e}")
             if attempt == max_retries - 1:

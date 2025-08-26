@@ -942,9 +942,12 @@ async def force_populate_dates(current_user: str = Depends(verify_token)):
         updated_count = 0
         total_creators = len(all_creators.data)
         
-        # Spread across exactly 7 days (not 14) for weekly distribution
+        # Spread across exactly 7 days for weekly distribution
         # Start from 8 days ago to ensure they're all due for rescraping
         base_date = datetime.utcnow() - timedelta(days=8)
+        
+        print(f"📊 Base date for distribution: {base_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"📊 This means creators will be due starting: {(base_date + timedelta(days=7)).strftime('%Y-%m-%d')}")
         
         # Batch update for better performance
         batch_size = 50
@@ -1035,10 +1038,21 @@ async def test_distribution(current_user: str = Depends(verify_token)):
             
             due_schedule[f"{future_date.strftime('%A')} ({future_date.strftime('%Y-%m-%d')})"] = count_response.count
         
+        # Also get total counts for verification
+        total_creators = supabase.table("creatordata").select("id", count="exact").execute().count
+        null_creators = supabase.table("creatordata").select("id", count="exact").is_("updated_at", "null").execute().count
+        
         return {
+            "total_creators": total_creators,
+            "null_creators": null_creators,
             "current_distribution_past_14_days": distribution,
             "creators_due_next_7_days": due_schedule,
-            "explanation": "This shows how creators are currently distributed and when they'll be due for rescraping"
+            "explanation": "This shows how creators are currently distributed and when they'll be due for rescraping",
+            "summary": {
+                "total_due_next_7_days": sum(due_schedule.values()),
+                "most_busy_day": max(due_schedule.items(), key=lambda x: x[1]) if due_schedule else None,
+                "distribution_looks_even": max(due_schedule.values()) - min(due_schedule.values()) < 50 if due_schedule else False
+            }
         }
         
     except Exception as e:

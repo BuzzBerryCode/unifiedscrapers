@@ -158,88 +158,9 @@ export default function RescrapeManagement() {
     }
   }
 
-  const handleTestDistribution = async () => {
-    setActionLoading('test-distribution')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/test-distribution`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (response.ok) {
-        const testData = await response.json()
-        console.log('📊 Distribution Test:', testData)
-        toast.success('Distribution test logged to console (F12)')
-        
-        // Show a summary
-        const dueToday = Object.values(testData.creators_due_next_7_days)[0] as number
-        toast.success(`Due today: ${dueToday} creators. Check console for full breakdown.`)
-      } else {
-        throw new Error('Failed to test distribution')
-      }
-    } catch (error) {
-      console.error('Test distribution error:', error)
-      toast.error('Failed to test distribution')
-    } finally {
-      setActionLoading('')
-    }
-  }
 
-  const handleFixDistribution = async () => {
-    if (!confirm('This will redistribute ALL creators evenly across 7 days using proper modulo arithmetic. This may take a few minutes. Continue?')) return
-    
-    setActionLoading('fix-distribution')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/fix-distribution`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh the data
-      } else {
-        throw new Error('Failed to fix distribution')
-      }
-    } catch (error) {
-      console.error('Error fixing distribution:', error)
-      toast.error('Failed to fix distribution')
-    } finally {
-      setActionLoading('')
-    }
-  }
 
-  const handleDebugData = async () => {
-    setActionLoading('debug')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/debug`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (response.ok) {
-        const debugData = await response.json()
-        console.log('🔍 Debug Data:', debugData)
-        toast.success('Debug data logged to console (F12)')
-        
-        // Also show a summary in a toast
-        const summary = `Total: ${debugData.total_creators}, Null dates: ${debugData.null_updated_at}, Due: ${debugData.older_than_7_days}`
-        toast.success(summary)
-      } else {
-        throw new Error('Failed to get debug data')
-      }
-    } catch (error) {
-      console.error('Debug error:', error)
-      toast.error('Failed to get debug data')
-    } finally {
-      setActionLoading('')
-    }
-  }
+
 
   const handleStartRescrape = async (platform: string) => {
     setActionLoading(`rescrape-${platform}`)
@@ -427,13 +348,13 @@ export default function RescrapeManagement() {
 
           <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center">
-              <CalendarIcon className="h-8 w-8 text-yellow-500" />
+              <CalendarIcon className="h-8 w-8 text-green-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Need Dates
+                  Daily Average
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.creators_need_dates?.toLocaleString() || 0}
+                  {stats?.weekly_schedule ? Math.round(Object.values(stats.weekly_schedule).reduce((sum: number, day: any) => sum + (day.estimated_creators || 0), 0) / 7) : 0}
                 </p>
               </div>
             </div>
@@ -444,7 +365,7 @@ export default function RescrapeManagement() {
               <ClockIcon className="h-8 w-8 text-red-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Due for Rescrape
+                  Due Today
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                   {stats?.creators_due_rescrape?.toLocaleString() || 0}
@@ -620,65 +541,7 @@ export default function RescrapeManagement() {
                 </div>
               </div>
 
-              {/* Debug Data */}
-              <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>
-                <h3 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  Debug & Fix Tools
-                </h3>
-                <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Debug database state and fix distribution issues.
-                </p>
-                <div className="space-y-2">
-                  <button
-                    onClick={handleDebugData}
-                    disabled={actionLoading === 'debug'}
-                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'debug' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Cog6ToothIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Debug Data
-                  </button>
-                  <button
-                    onClick={handleTestDistribution}
-                    disabled={actionLoading === 'test-distribution'}
-                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'test-distribution' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <ChartBarIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Test Distribution
-                  </button>
-                  <button
-                    onClick={handleFixDistribution}
-                    disabled={actionLoading === 'fix-distribution'}
-                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'fix-distribution' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Cog6ToothIcon className="h-4 w-4 mr-2" />
-                    )}
-                    🔧 Fix Distribution (Redistribute All)
-                  </button>
-                  <button
-                    onClick={handleForcePopulateDates}
-                    disabled={actionLoading === 'force-populate'}
-                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'force-populate' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <CalendarIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Force Redistribute All Dates
-                  </button>
-                </div>
-              </div>
+
             </div>
           </div>
         </div>

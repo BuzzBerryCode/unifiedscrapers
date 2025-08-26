@@ -804,9 +804,13 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
         null_updated_response = supabase.table("creatordata").select("id", count="exact").is_("updated_at", "null").execute()
         creators_need_dates = null_updated_response.count
         
-        # Get creators due for rescraping (updated > 7 days ago OR null updated_at)
-        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
-        due_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago).execute()
+        # Get creators due for rescraping TODAY (updated exactly 7 days ago)
+        today = datetime.utcnow().date()
+        seven_days_ago_start = (today - timedelta(days=7))
+        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
+        
+        # Count creators due today (updated 7 days ago)
+        due_response = supabase.table("creatordata").select("id", count="exact").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
         creators_due = due_response.count + creators_need_dates  # Include creators with null dates
         
         # Set daily rescraping time to 9:00 AM UTC

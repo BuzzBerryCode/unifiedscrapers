@@ -1078,11 +1078,13 @@ async def fix_rescraping_distribution(current_user: str = Depends(verify_token))
         updated_count = 0
         total_creators = len(all_creators.data)
         
-        # Spread across exactly 7 days, starting from 8 days ago (so they're all due)
-        base_date = datetime.utcnow() - timedelta(days=8)
+        # Spread creators across the PAST 7 days so they become due on DIFFERENT days
+        # If a creator was updated 7 days ago, they're due TODAY
+        # If a creator was updated 6 days ago, they're due TOMORROW, etc.
         
-        print(f"📊 Base date: {base_date.strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"📊 Creators will be due starting: {(base_date + timedelta(days=7)).strftime('%Y-%m-%d')}")
+        now = datetime.utcnow()
+        print(f"📊 Current time: {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"📊 Spreading creators across past 7 days for staggered due dates")
         
         # Batch update for better performance
         batch_size = 50
@@ -1096,13 +1098,22 @@ async def fix_rescraping_distribution(current_user: str = Depends(verify_token))
                 # Calculate which day this creator should be assigned to (0-6)
                 day_offset = global_index % 7
                 
-                # Calculate the target date
-                target_date = base_date + timedelta(days=day_offset)
+                # Calculate the target date: spread across PAST 7 days
+                # day_offset=0 -> 7 days ago (due TODAY)
+                # day_offset=1 -> 6 days ago (due TOMORROW)
+                # day_offset=6 -> 1 day ago (due in 6 days)
+                days_ago = 7 - day_offset
+                target_date = now - timedelta(days=days_ago)
                 
                 # Add some random hours/minutes for natural distribution
                 random_hours = random.randint(6, 18)  # Between 6 AM and 6 PM
                 random_minutes = random.randint(0, 59)
                 target_date = target_date.replace(hour=random_hours, minute=random_minutes, second=0, microsecond=0)
+                
+                # Show when this creator will be due (7 days after updated_at)
+                due_date = target_date + timedelta(days=7)
+                if global_index < 10:  # Show first 10 for debugging
+                    print(f"📅 Creator {global_index}: updated_at={target_date.strftime('%Y-%m-%d')}, due={due_date.strftime('%Y-%m-%d')}")
                 
                 try:
                     supabase.table("creatordata").update({
@@ -1120,11 +1131,11 @@ async def fix_rescraping_distribution(current_user: str = Depends(verify_token))
         print(f"✅ Successfully redistributed {updated_count} creators across 7 days")
         
         return {
-            "message": f"Successfully redistributed {updated_count} creators evenly across 7 days",
+            "message": f"Successfully redistributed {updated_count} creators across past 7 days for staggered due dates",
             "updated_count": updated_count,
             "total_creators": total_creators,
-            "base_date": base_date.strftime('%Y-%m-%d'),
-            "explanation": "All creators have been evenly distributed across 7 days using modulo arithmetic to ensure perfect balance"
+            "current_time": now.strftime('%Y-%m-%d %H:%M:%S'),
+            "explanation": "Creators spread across past 7 days so they become due on different days (7 days after their updated_at date)"
         }
         
     except Exception as e:

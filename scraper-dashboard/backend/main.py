@@ -8,6 +8,7 @@ import io
 from datetime import datetime, timedelta
 import uuid
 import asyncio
+import random
 from typing import List, Optional
 import redis
 import json
@@ -1057,6 +1058,77 @@ async def test_distribution(current_user: str = Depends(verify_token)):
         
     except Exception as e:
         print(f"Test distribution error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/fix-distribution")
+async def fix_rescraping_distribution(current_user: str = Depends(verify_token)):
+    """Fix the rescraping distribution by evenly spreading ALL creators across 7 days."""
+    try:
+        print("🔧 Starting complete rescraping distribution fix...")
+        
+        # Get ALL creators (not just null ones)
+        all_creators = supabase.table("creatordata").select("id, handle, platform").execute()
+        
+        if not all_creators.data:
+            return {"message": "No creators found", "updated_count": 0}
+        
+        print(f"📅 Redistributing ALL {len(all_creators.data)} creators across 7 days")
+        
+        updated_count = 0
+        total_creators = len(all_creators.data)
+        
+        # Spread across exactly 7 days, starting from 8 days ago (so they're all due)
+        base_date = datetime.utcnow() - timedelta(days=8)
+        
+        print(f"📊 Base date: {base_date.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"📊 Creators will be due starting: {(base_date + timedelta(days=7)).strftime('%Y-%m-%d')}")
+        
+        # Batch update for better performance
+        batch_size = 50
+        for batch_start in range(0, total_creators, batch_size):
+            batch_end = min(batch_start + batch_size, total_creators)
+            batch_creators = all_creators.data[batch_start:batch_end]
+            
+            for i, creator in enumerate(batch_creators):
+                global_index = batch_start + i
+                
+                # Calculate which day this creator should be assigned to (0-6)
+                day_offset = global_index % 7
+                
+                # Calculate the target date
+                target_date = base_date + timedelta(days=day_offset)
+                
+                # Add some random hours/minutes for natural distribution
+                random_hours = random.randint(6, 18)  # Between 6 AM and 6 PM
+                random_minutes = random.randint(0, 59)
+                target_date = target_date.replace(hour=random_hours, minute=random_minutes, second=0, microsecond=0)
+                
+                try:
+                    supabase.table("creatordata").update({
+                        "updated_at": target_date.isoformat()
+                    }).eq("id", creator["id"]).execute()
+                    
+                    updated_count += 1
+                    
+                except Exception as e:
+                    print(f"❌ Error updating creator {creator['handle']}: {e}")
+                    continue
+            
+            print(f"📊 Processed batch {batch_start}-{batch_end} ({updated_count}/{total_creators} updated)")
+        
+        print(f"✅ Successfully redistributed {updated_count} creators across 7 days")
+        
+        return {
+            "message": f"Successfully redistributed {updated_count} creators evenly across 7 days",
+            "updated_count": updated_count,
+            "total_creators": total_creators,
+            "base_date": base_date.strftime('%Y-%m-%d'),
+            "explanation": "All creators have been evenly distributed across 7 days using modulo arithmetic to ensure perfect balance"
+        }
+        
+    except Exception as e:
+        print(f"Fix distribution error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

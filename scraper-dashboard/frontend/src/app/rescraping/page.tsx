@@ -186,6 +186,33 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleFixDistribution = async () => {
+    if (!confirm('This will redistribute ALL creators evenly across 7 days using proper modulo arithmetic. This may take a few minutes. Continue?')) return
+    
+    setActionLoading('fix-distribution')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/fix-distribution`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        fetchData() // Refresh the data
+      } else {
+        throw new Error('Failed to fix distribution')
+      }
+    } catch (error) {
+      console.error('Error fixing distribution:', error)
+      toast.error('Failed to fix distribution')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const handleDebugData = async () => {
     setActionLoading('debug')
     try {
@@ -625,6 +652,18 @@ export default function RescrapeManagement() {
                       <ChartBarIcon className="h-4 w-4 mr-2" />
                     )}
                     Test Distribution
+                  </button>
+                  <button
+                    onClick={handleFixDistribution}
+                    disabled={actionLoading === 'fix-distribution'}
+                    className="w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'fix-distribution' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Cog6ToothIcon className="h-4 w-4 mr-2" />
+                    )}
+                    🔧 Fix Distribution (Redistribute All)
                   </button>
                   <button
                     onClick={handleForcePopulateDates}

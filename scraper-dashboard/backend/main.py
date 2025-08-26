@@ -1098,17 +1098,25 @@ async def fix_rescraping_distribution(current_user: str = Depends(verify_token))
                 # Calculate which day this creator should be assigned to (0-6)
                 day_offset = global_index % 7
                 
-                # Calculate the target date: spread across PAST 7 days
-                # day_offset=0 -> 7 days ago (due TODAY)
-                # day_offset=1 -> 6 days ago (due TOMORROW)
-                # day_offset=6 -> 1 day ago (due in 6 days)
+                # Calculate the target date: spread across PAST 7 days from today (Aug 25th)
+                # day_offset=0 -> 7 days ago (Aug 18th, due today Aug 25th)
+                # day_offset=1 -> 6 days ago (Aug 19th, due tomorrow Aug 26th)
+                # day_offset=6 -> 1 day ago (Aug 24th, due Aug 31st)
                 days_ago = 7 - day_offset
                 target_date = now - timedelta(days=days_ago)
                 
-                # Add some random hours/minutes for natural distribution
+                # Add random time within the day to avoid clustering
                 random_hours = random.randint(6, 18)  # Between 6 AM and 6 PM
                 random_minutes = random.randint(0, 59)
-                target_date = target_date.replace(hour=random_hours, minute=random_minutes, second=0, microsecond=0)
+                random_seconds = random.randint(0, 59)
+                
+                # Set the specific date with random time
+                target_date = target_date.replace(
+                    hour=random_hours, 
+                    minute=random_minutes, 
+                    second=random_seconds, 
+                    microsecond=random.randint(0, 999999)
+                )
                 
                 # Show when this creator will be due (7 days after updated_at)
                 due_date = target_date + timedelta(days=7)

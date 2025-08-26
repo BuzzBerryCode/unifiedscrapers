@@ -131,32 +131,7 @@ export default function RescrapeManagement() {
     }
   }
 
-  const handleForcePopulateDates = async () => {
-    if (!confirm('This will reset ALL creator dates to ensure even distribution. This may take a few minutes. Continue?')) return
-    
-    setActionLoading('force-populate')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/force-populate-dates`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh the data
-      } else {
-        throw new Error('Failed to force populate dates')
-      }
-    } catch (error) {
-      console.error('Force populate error:', error)
-      toast.error('Failed to force populate dates')
-    } finally {
-      setActionLoading('')
-    }
-  }
+
 
 
 
@@ -354,7 +329,7 @@ export default function RescrapeManagement() {
                   Daily Average
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.weekly_schedule ? Math.round(Object.values(stats.weekly_schedule).reduce((sum: number, day: any) => sum + (day.estimated_creators || 0), 0) / 7) : 0}
+                  {stats?.weekly_schedule ? Math.round(Object.values(stats.weekly_schedule).reduce((sum: number, day: { estimated_creators?: number }) => sum + (day.estimated_creators || 0), 0) / 7) : 0}
                 </p>
               </div>
             </div>

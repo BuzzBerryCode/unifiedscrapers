@@ -133,51 +133,9 @@ export default function Dashboard() {
     toast.success('Logged out successfully')
   }, [])
 
-  const handleResumeJob = useCallback(async (jobId: string) => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}/resume`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-      });
 
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Job resumed successfully! Continuing from item ${result.resume_from_index + 1}/${result.total_items}`);
-        fetchData(); // Refresh the job list
-      } else {
-        const error = await response.json();
-        toast.error(`Failed to resume job: ${error.detail}`);
-      }
-    } catch (error) {
-      console.error('Error resuming job:', error);
-      toast.error('Failed to resume job. Please try again.');
-    }
-  }, [token, fetchData]);
 
-  const handleCancelJob = useCallback(async (jobId: string) => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
 
-      if (response.ok) {
-        toast.success('Job cancelled successfully!');
-        fetchData(); // Refresh the job list
-      } else {
-        const error = await response.json();
-        toast.error(`Failed to cancel job: ${error.detail}`);
-      }
-    } catch (error) {
-      console.error('Error cancelling job:', error);
-      toast.error('Failed to cancel job. Please try again.');
-    }
-  }, [token, fetchData]);
 
   const handleRemoveJob = useCallback(async (jobId: string) => {
     try {

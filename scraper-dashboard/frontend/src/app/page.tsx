@@ -201,6 +201,55 @@ export default function Dashboard() {
     }
   }, [token, fetchData]);
 
+  const handleResumeJob = useCallback(async (jobId: string) => {
+    if (!token) return;
+    
+    try {
+      // Check if this is a restart (for running jobs) or resume (for failed/cancelled jobs)
+      const job = jobs.find(j => j.id === jobId);
+      const endpoint = job?.status === 'running' ? 'restart' : 'resume';
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}/${endpoint}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const action = endpoint === 'restart' ? 'restarted' : 'resumed';
+        toast.success(`Job ${action} successfully`);
+        fetchData(); // Refresh the data
+      } else {
+        const error = await response.json();
+        toast.error(error.detail || `Failed to ${endpoint} job`);
+      }
+    } catch (error) {
+      console.error('Resume/restart job error:', error);
+      toast.error('Failed to resume/restart job. Please try again.');
+    }
+  }, [token, fetchData, jobs]);
+
+  const handleCancelJob = useCallback(async (jobId: string) => {
+    if (!token) return;
+    
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/${jobId}/force-cancel`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        toast.success('Job cancelled successfully');
+        fetchData(); // Refresh the data
+      } else {
+        const error = await response.json();
+        toast.error(error.detail || 'Failed to cancel job');
+      }
+    } catch (error) {
+      console.error('Cancel job error:', error);
+      toast.error('Failed to cancel job. Please try again.');
+    }
+  }, [token, fetchData]);
+
   // Memoize expensive computations
   const memoizedJobs = useMemo(() => jobs, [jobs])
   const memoizedStats = useMemo(() => stats, [stats])
@@ -357,7 +406,7 @@ export default function Dashboard() {
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-8">
               <div className="flex items-center space-x-3">
-                <Image
+        <Image
                   src="/Buzzberry profile picture rounded corners-256x256.png" 
                   alt="BuzzBerry Logo" 
                   width={32} 

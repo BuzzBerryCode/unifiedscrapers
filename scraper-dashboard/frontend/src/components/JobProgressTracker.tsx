@@ -117,24 +117,36 @@ export default function JobProgressTracker({ job, darkMode, onResume, onCancel }
         </div>
         
         <div className="flex items-center space-x-2">
-          {job.status === 'cancelled' && onResume && (
+          {(job.status === 'cancelled' || job.status === 'failed') && onResume && (
             <button
               onClick={() => onResume(job.id)}
-              className="px-3 py-1 bg-blue-500 text-white rounded text-sm hover:bg-blue-600 flex items-center space-x-1"
+              className="px-3 py-1 bg-green-500 text-white rounded text-sm hover:bg-green-600 flex items-center space-x-1"
             >
               <PlayIcon className="h-4 w-4" />
               <span>Resume</span>
             </button>
           )}
           
-          {job.status === 'running' && onCancel && (
-            <button
-              onClick={() => onCancel(job.id)}
-              className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 flex items-center space-x-1"
-            >
-              <PauseIcon className="h-4 w-4" />
-              <span>Cancel</span>
-            </button>
+          {job.status === 'running' && (
+            <>
+              <button
+                onClick={() => onResume && onResume(job.id)}
+                className="px-3 py-1 bg-yellow-500 text-white rounded text-sm hover:bg-yellow-600 flex items-center space-x-1"
+                title="Restart from current position"
+              >
+                <ArrowPathIcon className="h-4 w-4" />
+                <span>Restart</span>
+              </button>
+              {onCancel && (
+                <button
+                  onClick={() => onCancel(job.id)}
+                  className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600 flex items-center space-x-1"
+                >
+                  <PauseIcon className="h-4 w-4" />
+                  <span>Cancel</span>
+                </button>
+              )}
+            </>
           )}
           
           <button

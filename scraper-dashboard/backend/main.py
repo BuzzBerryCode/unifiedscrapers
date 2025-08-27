@@ -2110,6 +2110,106 @@ async def force_kill_all_background_processes(current_user: str = Depends(verify
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/jobs/clear-force-stop-flag")
+async def clear_force_stop_flag(current_user: str = Depends(verify_token)):
+    """Clear the force stop flag that might be preventing jobs from starting"""
+    try:
+        redis_client = get_redis_client()
+        if redis_client:
+            # Check if flag exists
+            flag_exists = redis_client.get("FORCE_STOP_ALL_JOBS")
+            if flag_exists:
+                redis_client.delete("FORCE_STOP_ALL_JOBS")
+                message = "Force stop flag cleared - jobs can now start normally"
+                print(f"🟢 {message}")
+            else:
+                message = "No force stop flag found - jobs should be able to start normally"
+                print(f"ℹ️ {message}")
+                
+            # Try to start any pending jobs
+            start_next_queued_job()
+            
+            return {
+                "message": message,
+                "flag_was_set": bool(flag_exists),
+                "action": "attempted_to_start_queued_jobs"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Redis connection failed")
+            
+    except Exception as e:
+        print(f"❌ Clear force stop flag error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/jobs/debug-status")
+async def debug_job_status(current_user: str = Depends(verify_token)):
+    """Debug endpoint to check current job execution status"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get all recent jobs (last 10)
+        recent_jobs = supabase.table("scraper_jobs").select("*").order("created_at", desc=True).limit(10).execute()
+        
+        # Get running jobs
+        running_jobs = supabase.table("scraper_jobs").select("*").eq("status", JobStatus.RUNNING).execute()
+        
+        # Get pending/queued jobs
+        pending_jobs = supabase.table("scraper_jobs").select("*").in_("status", [JobStatus.PENDING, JobStatus.QUEUED]).execute()
+        
+        # Check Redis flags
+        redis_info = {}
+        redis_client = get_redis_client()
+        if redis_client:
+            try:
+                redis_info["force_stop_flag"] = bool(redis_client.get("FORCE_STOP_ALL_JOBS"))
+                redis_info["queue_paused"] = redis_client.get("queue_paused") == "true"
+                
+                # Check if there are any Redis job keys
+                redis_keys = redis_client.keys("rescrape_job:*")
+                redis_info["active_job_keys"] = len(redis_keys)
+                redis_info["job_keys"] = [key.decode() for key in redis_keys[:5]]  # Show first 5
+            except Exception as redis_error:
+                redis_info["error"] = str(redis_error)
+        
+        # Try to import tasks module to check for import issues
+        tasks_import_status = "unknown"
+        try:
+            from tasks import rescrape_all_creators
+            tasks_import_status = "success"
+        except Exception as import_error:
+            tasks_import_status = f"failed: {str(import_error)}"
+        
+        return {
+            "recent_jobs": [
+                {
+                    "id": job["id"][:8],  # Shortened ID
+                    "job_type": job["job_type"],
+                    "status": job["status"],
+                    "created_at": job["created_at"],
+                    "error_message": job.get("error_message", "")[:100] if job.get("error_message") else None
+                }
+                for job in recent_jobs.data
+            ],
+            "running_jobs_count": len(running_jobs.data),
+            "pending_queued_count": len(pending_jobs.data),
+            "redis_info": redis_info,
+            "tasks_import_status": tasks_import_status,
+            "next_action_suggestion": (
+                "Clear force stop flag" if redis_info.get("force_stop_flag") 
+                else "Check task import error" if "failed" in tasks_import_status
+                else "Try manual job start" if len(pending_jobs.data) > 0
+                else "All looks normal - check server logs for job execution errors"
+            )
+        }
+        
+    except Exception as e:
+        print(f"❌ Debug status error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

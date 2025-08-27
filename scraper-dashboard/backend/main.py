@@ -124,6 +124,15 @@ def start_job_directly(job_id: str, job_type: str):
             elif job_type == "daily_rescrape":
                 from tasks import rescrape_all_creators
                 rescrape_all_creators(job_id)  # Use same function, it handles auto-rescrape data
+            elif job_type == "rescrape_overdue_all":
+                from tasks import rescrape_all_creators
+                rescrape_all_creators(job_id)  # Use same function, data comes from Redis
+            elif job_type == "rescrape_overdue_instagram":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "instagram")  # Filters to Instagram from Redis data
+            elif job_type == "rescrape_overdue_tiktok":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "tiktok")  # Filters to TikTok from Redis data
             else:
                 print(f"❌ Unknown job type: {job_type}")
                 return
@@ -813,8 +822,9 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
         due_response = supabase.table("creatordata").select("id", count="exact").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
         creators_due = due_response.count + creators_need_dates  # Include creators with null dates
         
-        # Set daily rescraping time to 9:00 AM UTC
-        DAILY_RESCRAPE_HOUR = 9
+        # Set daily rescraping time to 8:00 AM San Francisco time (15:00 UTC in PDT)
+        DAILY_RESCRAPE_HOUR = 8  # San Francisco time
+        DAILY_RESCRAPE_UTC_HOUR = 15  # UTC equivalent (PDT)
         
         # Get creators by day of week for next 7 days based on actual updated_at dates
         schedule = {}
@@ -834,27 +844,45 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
             if i == 0:
                 creators_due_count.count += creators_need_dates
             
-            # Set scheduled time for daily rescrape
-            scheduled_time = target_date.replace(hour=DAILY_RESCRAPE_HOUR, minute=0, second=0, microsecond=0)
+            # Set scheduled time for daily rescrape (8:00 AM San Francisco time = 15:00 UTC)
+            scheduled_time_utc = target_date.replace(hour=DAILY_RESCRAPE_UTC_HOUR, minute=0, second=0, microsecond=0)
             
             schedule[day_name] = {
                 "date": target_date.strftime("%Y-%m-%d"),
                 "day": day_name,
                 "estimated_creators": creators_due_count.count,
-                "scheduled_time": scheduled_time.strftime("%H:%M UTC"),
+                "scheduled_time": f"{DAILY_RESCRAPE_HOUR}:00 AM PST/PDT",
+                "scheduled_time_utc": scheduled_time_utc.strftime("%H:%M UTC"),
                 "is_today": i == 0,
-                "is_past_time": datetime.utcnow() > scheduled_time if i == 0 else False
+                "is_past_time": datetime.utcnow() > scheduled_time_utc if i == 0 else False
             }
         
         # Get recent rescraping jobs (including daily jobs)
         recent_jobs = supabase.table("scraper_jobs").select("*").in_("job_type", ["rescrape_all", "rescrape_instagram", "rescrape_tiktok", "daily_rescrape"]).order("created_at", desc=True).limit(10).execute()
         
+        # Get additional breakdown for better UI
+        # Count ALL overdue creators (7+ days old)
+        seven_days_ago_total = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        overdue_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago_total).execute()
+        total_overdue = overdue_response.count
+        
+        # Count just today's batch (exactly 7 days ago)
+        todays_batch = due_response.count  # This is from the existing query above
+        
         return {
             "total_creators": total_creators,
             "creators_need_dates": creators_need_dates,
-            "creators_due_rescrape": creators_due,
+            "creators_due_rescrape": creators_due,  # Today's batch + null dates
+            "total_overdue_creators": total_overdue,  # ALL overdue (7+ days)
+            "todays_scheduled_batch": todays_batch,  # Just today's exact batch
+            "remaining_overdue": max(0, total_overdue + creators_need_dates - todays_batch),  # The "extra" ones
             "weekly_schedule": schedule,
-            "recent_jobs": recent_jobs.data
+            "recent_jobs": recent_jobs.data,
+            "schedule_info": {
+                "time_sf": f"{DAILY_RESCRAPE_HOUR}:00 AM PST/PDT",
+                "time_utc": f"{DAILY_RESCRAPE_UTC_HOUR}:00 UTC",
+                "description": "Automatic daily rescraping includes ALL overdue creators (not just today's batch)"
+            }
         }
         
     except Exception as e:
@@ -1180,6 +1208,90 @@ async def get_due_creators(current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/rescraping/start-overdue-only")
+async def start_overdue_rescrape(request: dict, current_user: str = Depends(verify_token)):
+    """Start rescraping for only the overdue creators (selective re-run)"""
+    try:
+        platform = request.get("platform", "all")  # all, instagram, tiktok
+        max_creators = request.get("max_creators", 200)  # Higher limit for cleanup runs
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        # Build query based on platform
+        query = supabase.table("creatordata").select("id", "handle", "platform", "updated_at")
+        
+        if platform == "instagram":
+            query = query.eq("platform", "instagram")
+        elif platform == "tiktok":
+            query = query.eq("platform", "tiktok")
+        
+        # Get ALL overdue creators (7+ days old) + those with null dates
+        overdue_creators = query.lt("updated_at", seven_days_ago).order("updated_at").limit(max_creators).execute()
+        null_creators = supabase.table("creatordata").select("id", "handle", "platform").is_("updated_at", "null").limit(50).execute()
+        
+        all_creators = overdue_creators.data + null_creators.data
+        
+        if not all_creators:
+            return {"message": "No overdue creators found for rescraping", "job_id": None}
+        
+        # Create rescraping job
+        job_id = str(uuid.uuid4())
+        job_type_map = {
+            "all": "rescrape_overdue_all",
+            "instagram": "rescrape_overdue_instagram", 
+            "tiktok": "rescrape_overdue_tiktok"
+        }
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": job_type_map[platform],
+            "status": initial_status,
+            "total_items": len(all_creators),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Overdue cleanup: {len(overdue_creators.data)} overdue + {len(null_creators.data)} null dates ({platform})"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        redis_key = f"rescrape_job:{job_id}"
+        
+        creator_data = {
+            "creators": all_creators,
+            "platform_filter": platform,
+            "job_type": job_data["job_type"]
+        }
+        
+        redis_client.setex(redis_key, 86400, json.dumps(creator_data))  # 24 hours TTL
+        
+        return {
+            "message": f"Started overdue rescraping job for {len(all_creators)} creators",
+            "job_id": job_id,
+            "total_creators": len(all_creators),
+            "overdue_creators": len(overdue_creators.data),
+            "null_date_creators": len(null_creators.data),
+            "platform": platform,
+            "status": initial_status
+        }
+        
+    except Exception as e:
+        print(f"Overdue rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/rescraping/start-auto-rescrape")
 async def start_auto_rescrape(request: dict, current_user: str = Depends(verify_token)):
     """Start automatic rescraping of due creators"""
@@ -1484,7 +1596,7 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 def create_daily_rescraping_job():
-    """Create a daily rescraping job if creators are due today"""
+    """Create a daily rescraping job for ALL overdue creators (not just today's batch)"""
     try:
         print("⏰ Checking for daily rescraping job...")
         supabase = get_supabase_client()
@@ -1494,15 +1606,15 @@ def create_daily_rescraping_job():
             
         from datetime import datetime, timedelta
         
-        # Get creators that were last updated exactly 7 days ago (due today)
-        seven_days_ago_start = (datetime.utcnow() - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
-        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
+        # Get ALL creators that are overdue (7+ days old) - this fixes the "remaining creators" issue
+        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
         
-        # Find creators due for rescraping today + creators with null dates
-        due_creators = supabase.table("creatordata").select("id", "handle", "platform").gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).execute()
+        # Find ALL creators due for rescraping (7+ days old) + creators with null dates
+        overdue_creators = supabase.table("creatordata").select("id", "handle", "platform").lt("updated_at", seven_days_ago).order("updated_at").execute()
         null_creators = supabase.table("creatordata").select("id", "handle", "platform").is_("updated_at", "null").execute()
         
-        all_due_creators = due_creators.data + null_creators.data
+        all_due_creators = overdue_creators.data + null_creators.data
+        print(f"📊 Found {len(overdue_creators.data)} overdue creators + {len(null_creators.data)} with null dates = {len(all_due_creators)} total")
         
         if not all_due_creators:
             print("✅ No creators due for rescraping today")
@@ -1531,7 +1643,7 @@ def create_daily_rescraping_job():
             "processed_items": 0,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
-            "description": f"Daily rescrape - {len(all_due_creators)} creators due ({today_str})"
+            "description": f"Daily rescrape - {len(overdue_creators.data)} overdue + {len(null_creators.data)} null dates = {len(all_due_creators)} total creators ({today_str})"
         }
         
         supabase.table("scraper_jobs").insert(job_data).execute()
@@ -1552,14 +1664,18 @@ def create_daily_rescraping_job():
         traceback.print_exc()
 
 def run_daily_scheduler():
-    """Run a simple daily scheduler in a separate thread"""
-    print("📅 Starting daily job scheduler...")
+    """Run a timezone-aware daily scheduler for 8:00 AM San Francisco time"""
+    print("📅 Starting daily job scheduler (8:00 AM San Francisco time)...")
     
     while True:
         try:
+            # Calculate San Francisco time (PDT = UTC-7, PST = UTC-8)
+            # For simplicity, assuming PDT (most of the year): 8 AM PDT = 15:00 UTC
             now = datetime.utcnow()
-            # Check if it's 9:00 AM UTC and we haven't created a job today yet
-            if now.hour == 9 and now.minute == 0:
+            
+            # Check if it's 15:00 UTC (8:00 AM PDT) 
+            if now.hour == 15 and now.minute == 0:
+                print(f"⏰ Triggering daily rescrape at {now.strftime('%Y-%m-%d %H:%M')} UTC (8:00 AM PDT)")
                 create_daily_rescraping_job()
                 # Sleep for 2 minutes to avoid creating multiple jobs in the same minute
                 time.sleep(120)

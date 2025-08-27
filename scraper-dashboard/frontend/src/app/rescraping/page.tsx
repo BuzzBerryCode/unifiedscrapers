@@ -13,14 +13,27 @@ import {
   PlayIcon,
   Cog6ToothIcon,
   SunIcon,
-  MoonIcon
+  MoonIcon,
+  ExclamationTriangleIcon,
+  FireIcon
 } from '@heroicons/react/24/outline'
 
 interface RescrapeStats {
   total_creators: number
   creators_need_dates: number
   creators_due_rescrape: number
-  weekly_schedule: { [key: string]: { date: string; day: string; estimated_creators: number; scheduled_time: string; is_today?: boolean; is_past_time?: boolean } }
+  total_overdue_creators: number
+  todays_scheduled_batch: number
+  remaining_overdue: number
+  weekly_schedule: { [key: string]: { 
+    date: string; 
+    day: string; 
+    estimated_creators: number; 
+    scheduled_time: string;
+    scheduled_time_utc: string;
+    is_today?: boolean; 
+    is_past_time?: boolean 
+  } }
   recent_jobs: Array<{
     id: string
     job_type: string
@@ -28,6 +41,11 @@ interface RescrapeStats {
     total_items: number
     created_at: string
   }>
+  schedule_info: {
+    time_sf: string
+    time_utc: string
+    description: string
+  }
 }
 
 interface DueCreator {
@@ -175,6 +193,38 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleStartOverdueRescrape = async (platform: string) => {
+    setActionLoading(`overdue-${platform}`)
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/start-overdue-only`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ 
+          platform, 
+          max_creators: 200  // Higher limit for cleanup runs
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        fetchData() // Refresh data
+      } else {
+        throw new Error('Failed to start overdue rescraping')
+      }
+    } catch (error) {
+      console.error('Error starting overdue rescrape:', error)
+      toast.error('Failed to start overdue rescraping')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -301,11 +351,11 @@ export default function RescrapeManagement() {
             Rescraping Management
           </h1>
           <p className={`mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            Manage automatic 7-day rescraping schedule and monitor creator updates
+            Automatic rescraping at 8:00 AM San Francisco time includes ALL overdue creators. Monitor progress and handle selective cleanup.
           </p>
         </div>
 
-        {/* Stats Cards */}
+        {/* Enhanced Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center">
@@ -326,10 +376,13 @@ export default function RescrapeManagement() {
               <CalendarIcon className="h-8 w-8 text-green-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Daily Average
+                  Today's Batch
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.weekly_schedule ? Math.round(Object.values(stats.weekly_schedule).reduce((sum: number, day: { estimated_creators?: number }) => sum + (day.estimated_creators || 0), 0) / 7) : 0}
+                  {stats?.todays_scheduled_batch?.toLocaleString() || 0}
+                </p>
+                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  Scheduled
                 </p>
               </div>
             </div>
@@ -337,13 +390,16 @@ export default function RescrapeManagement() {
 
           <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center">
-              <ClockIcon className="h-8 w-8 text-red-500" />
+              <ExclamationTriangleIcon className={`h-8 w-8 ${(stats?.remaining_overdue || 0) > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Due Today
+                  Overdue
                 </p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.creators_due_rescrape?.toLocaleString() || 0}
+                <p className={`text-2xl font-bold ${(stats?.remaining_overdue || 0) > 0 ? 'text-orange-500' : (darkMode ? 'text-white' : 'text-gray-900')}`}>
+                  {stats?.remaining_overdue?.toLocaleString() || 0}
+                </p>
+                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  Need attention
                 </p>
               </div>
             </div>
@@ -351,13 +407,16 @@ export default function RescrapeManagement() {
 
           <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
             <div className="flex items-center">
-              <ChartBarIcon className="h-8 w-8 text-green-500" />
+              <ClockIcon className="h-8 w-8 text-blue-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Daily Average
+                  Schedule Time
                 </p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {Math.round(((stats?.creators_due_rescrape || 0) + (stats?.creators_need_dates || 0)) / 7)}
+                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
+                  {stats?.schedule_info?.time_sf || '8:00 AM PST/PDT'}
+                </p>
+                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  {stats?.schedule_info?.time_utc || '15:00 UTC'}
                 </p>
               </div>
             </div>
@@ -389,7 +448,7 @@ export default function RescrapeManagement() {
                       )}
                     </div>
                     <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {day.date} • Scheduled at {day.scheduled_time}
+                      {day.date} • {day.scheduled_time} ({day.scheduled_time_utc})
                       <br />
                       {day.estimated_creators > 0 ? `${day.estimated_creators} creators due` : 'No creators due'}
                       {day.is_today && day.is_past_time && (
@@ -516,6 +575,59 @@ export default function RescrapeManagement() {
                 </div>
               </div>
 
+              {/* Overdue Creators Section */}
+              {(stats?.remaining_overdue || 0) > 0 && (
+                <div className={`p-4 border rounded-lg ${darkMode ? 'border-orange-600 bg-orange-900/10' : 'border-orange-300 bg-orange-50'}`}>
+                  <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-orange-300' : 'text-orange-800'}`}>
+                    <FireIcon className="h-5 w-5 mr-2" />
+                    Cleanup Overdue Creators
+                  </h3>
+                  <p className={`text-sm mb-3 ${darkMode ? 'text-orange-200' : 'text-orange-700'}`}>
+                    {stats?.remaining_overdue || 0} creators are overdue and need immediate attention. 
+                    These are likely the ones with API failures before the recent fixes.
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleStartOverdueRescrape('all')}
+                      disabled={actionLoading.startsWith('overdue')}
+                      className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50"
+                    >
+                      {actionLoading === 'overdue-all' ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <FireIcon className="h-4 w-4 mr-2" />
+                      )}
+                      Rescrape Overdue Only ({stats?.remaining_overdue || 0})
+                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleStartOverdueRescrape('instagram')}
+                        disabled={actionLoading.startsWith('overdue')}
+                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
+                      >
+                        {actionLoading === 'overdue-instagram' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <PlayIcon className="h-4 w-4 mr-2" />
+                        )}
+                        Instagram Only
+                      </button>
+                      <button
+                        onClick={() => handleStartOverdueRescrape('tiktok')}
+                        disabled={actionLoading.startsWith('overdue')}
+                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+                      >
+                        {actionLoading === 'overdue-tiktok' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <PlayIcon className="h-4 w-4 mr-2" />
+                        )}
+                        TikTok Only
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
             </div>
           </div>

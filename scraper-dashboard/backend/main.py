@@ -142,6 +142,15 @@ def start_job_directly(job_id: str, job_type: str):
             elif job_type == "rescrape_todays_batch_tiktok":
                 from tasks import rescrape_platform_creators
                 rescrape_platform_creators(job_id, "tiktok")  # Filters to TikTok from Redis data
+            elif job_type == "fix_corrupted_all":
+                from tasks import rescrape_all_creators
+                rescrape_all_creators(job_id)  # Use same function, data comes from Redis
+            elif job_type == "fix_corrupted_instagram":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "instagram")  # Filters to Instagram from Redis data
+            elif job_type == "fix_corrupted_tiktok":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "tiktok")  # Filters to TikTok from Redis data
             else:
                 print(f"❌ Unknown job type: {job_type}")
                 return
@@ -1389,6 +1398,152 @@ async def start_todays_batch_rescrape(request: dict, current_user: str = Depends
         
     except Exception as e:
         print(f"Today's batch rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rescraping/corrupted-creators")
+async def get_corrupted_creators(current_user: str = Depends(verify_token)):
+    """Get creators with missing niches or corrupted data from the rescraper bug"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Find creators with missing primary_niche OR secondary_niche
+        missing_niches = supabase.table("creatordata").select("id", "handle", "platform", "primary_niche", "secondary_niche", "updated_at", "followers_count", "average_views", "engagement_rate").or_("primary_niche.is.null,secondary_niche.is.null").order("updated_at", desc=True).limit(100).execute()
+        
+        # Also find creators with suspicious zero metrics (likely corrupted)
+        zero_metrics = supabase.table("creatordata").select("id", "handle", "platform", "primary_niche", "secondary_niche", "updated_at", "followers_count", "average_views", "engagement_rate").or_("average_views.eq.0,engagement_rate.eq.0").gt("followers_count", 1000).order("updated_at", desc=True).limit(50).execute()
+        
+        # Combine and deduplicate by handle
+        all_corrupted = {}
+        
+        for creator in missing_niches.data:
+            all_corrupted[creator['handle']] = {
+                **creator,
+                'issues': []
+            }
+            if not creator.get('primary_niche'):
+                all_corrupted[creator['handle']]['issues'].append('missing_primary_niche')
+            if not creator.get('secondary_niche'):
+                all_corrupted[creator['handle']]['issues'].append('missing_secondary_niche')
+        
+        for creator in zero_metrics.data:
+            if creator['handle'] not in all_corrupted:
+                all_corrupted[creator['handle']] = {
+                    **creator,
+                    'issues': []
+                }
+            
+            if creator.get('average_views', 0) == 0:
+                all_corrupted[creator['handle']]['issues'].append('zero_average_views')
+            if creator.get('engagement_rate', 0) == 0:
+                all_corrupted[creator['handle']]['issues'].append('zero_engagement_rate')
+        
+        corrupted_list = list(all_corrupted.values())
+        
+        return {
+            "corrupted_creators": corrupted_list,
+            "total_count": len(corrupted_list),
+            "missing_niches_count": len(missing_niches.data),
+            "zero_metrics_count": len(zero_metrics.data)
+        }
+        
+    except Exception as e:
+        print(f"Corrupted creators error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/fix-corrupted-creators")
+async def fix_corrupted_creators(request: dict, current_user: str = Depends(verify_token)):
+    """Start rescraping job to fix creators with missing niches or corrupted data"""
+    try:
+        platform = request.get("platform", "all")  # all, instagram, tiktok
+        max_creators = request.get("max_creators", 100)  # Limit per job
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Get corrupted creators (missing niches OR zero metrics)
+        missing_niches_query = supabase.table("creatordata").select("id", "handle", "platform")
+        zero_metrics_query = supabase.table("creatordata").select("id", "handle", "platform")
+        
+        if platform == "instagram":
+            missing_niches_query = missing_niches_query.eq("platform", "instagram")
+            zero_metrics_query = zero_metrics_query.eq("platform", "instagram")
+        elif platform == "tiktok":
+            missing_niches_query = missing_niches_query.eq("platform", "tiktok")
+            zero_metrics_query = zero_metrics_query.eq("platform", "tiktok")
+        
+        # Find creators with missing niches
+        missing_niches = missing_niches_query.or_("primary_niche.is.null,secondary_niche.is.null").limit(max_creators // 2).execute()
+        
+        # Find creators with zero metrics but decent follower count (likely corrupted)
+        zero_metrics = zero_metrics_query.or_("average_views.eq.0,engagement_rate.eq.0").gt("followers_count", 1000).limit(max_creators // 2).execute()
+        
+        # Combine and deduplicate
+        all_creators = {}
+        for creator in missing_niches.data:
+            all_creators[creator['handle']] = creator
+        for creator in zero_metrics.data:
+            if creator['handle'] not in all_creators:
+                all_creators[creator['handle']] = creator
+        
+        creators_to_fix = list(all_creators.values())
+        
+        if not creators_to_fix:
+            return {"message": "No corrupted creators found to fix", "job_id": None}
+        
+        # Create rescraping job
+        job_id = str(uuid.uuid4())
+        job_type_map = {
+            "all": "fix_corrupted_all",
+            "instagram": "fix_corrupted_instagram", 
+            "tiktok": "fix_corrupted_tiktok"
+        }
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": job_type_map[platform],
+            "status": initial_status,
+            "total_items": len(creators_to_fix),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Fix corrupted data: {len(missing_niches.data)} missing niches + {len(zero_metrics.data)} zero metrics ({platform})"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        redis_key = f"rescrape_job:{job_id}"
+        
+        creator_data = {
+            "creators": creators_to_fix,
+            "platform_filter": platform,
+            "job_type": job_data["job_type"]
+        }
+        
+        redis_client.setex(redis_key, 86400, json.dumps(creator_data))  # 24 hours TTL
+        
+        return {
+            "message": f"Started corruption fix job for {len(creators_to_fix)} creators",
+            "job_id": job_id,
+            "total_creators": len(creators_to_fix),
+            "missing_niches": len(missing_niches.data),
+            "zero_metrics": len(zero_metrics.data),
+            "platform": platform,
+            "status": initial_status
+        }
+        
+    except Exception as e:
+        print(f"Fix corrupted creators error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

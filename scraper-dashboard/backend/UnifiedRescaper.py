@@ -573,12 +573,10 @@ def scrape_instagram_user_data(username):
         print(f"❌ Posts API call failed for @{username}: {error_msg}")
         
         # For posts, we might be able to continue with just profile data
-        if error_type in ['rate_limited', 'server_error', 'timeout', 'circuit_breaker']:
-            print(f"⏳ Using profile-only data due to posts API issue: {error_type}")
-            # We'll create a minimal data set with just profile info
-            posts_data = []
-        else:
-            return {'error': 'temporary', 'message': f'Posts API failed: {error_type}'}
+        # If posts API fails, we should fail the entire scraping process
+        # rather than updating with incomplete/zero metrics
+        print(f"⏳ Posts API failed for @{username}: {error_type}")
+        return {'error': 'temporary', 'message': f'Posts API failed: {error_type} - cannot calculate accurate metrics'}
     else:
         posts_data = posts_result['data'].get("items", [])
     
@@ -937,6 +935,28 @@ async def rescrape_and_update_creator(creator):
                 print(f"🚫 Creator @{handle} skipped: {reason}")
                 return {'handle': handle, 'status': 'failed', 'error': f'Skipped: {reason}'}
 
+        # Validate that we have meaningful data before updating
+        # If key metrics are missing or zero, it might indicate incomplete API data
+        followers_count = new_data.get('followers_count', 0)
+        avg_views = new_data.get('average_views', 0)
+        avg_likes = new_data.get('average_likes', 0)
+        
+        if followers_count == 0:
+            print(f"⚠️ Warning: @{handle} has zero followers - possibly incomplete API data")
+            return {'handle': handle, 'status': 'failed', 'error': 'Incomplete API data - zero followers detected'}
+        
+        # Check if we have engagement metrics (views, likes, or engagement_rate)
+        has_engagement_data = (
+            avg_views > 0 or 
+            avg_likes > 0 or 
+            new_data.get('engagement_rate', 0) > 0 or
+            new_data.get('average_comments', 0) > 0
+        )
+        
+        if not has_engagement_data:
+            print(f"⚠️ Warning: @{handle} has no engagement metrics - possibly incomplete API data")
+            return {'handle': handle, 'status': 'failed', 'error': 'Incomplete API data - no engagement metrics found'}
+
         # Delete old media before processing new media
         delete_all_creator_media(handle)
 
@@ -1011,9 +1031,10 @@ async def rescrape_and_update_creator(creator):
             "average_likes_change_type": likes_change_type,
             "average_comments_change": safe_int(comments_change),  # Convert percentage to integer
             "average_comments_change_type": comments_change_type,
-            "primary_niche": creator.get("primary_niche"),
-            "secondary_niche": creator.get("secondary_niche"),
-            "location": creator.get("location"),
+            # Preserve existing niche data - only update if we have better data
+            "primary_niche": creator.get("primary_niche") or new_data.get("primary_niche"),
+            "secondary_niche": creator.get("secondary_niche") or new_data.get("secondary_niche"),
+            "location": creator.get("location") or new_data.get("location"),
             "updated_at": datetime.now().isoformat(),
         }
         

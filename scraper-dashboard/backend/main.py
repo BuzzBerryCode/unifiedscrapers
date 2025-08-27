@@ -1944,6 +1944,80 @@ def run_daily_scheduler():
             print(f"❌ Daily scheduler error: {e}")
             time.sleep(60)
 
+@app.post("/jobs/emergency-restart-monitor")
+async def emergency_restart_monitor(current_user: str = Depends(verify_token)):
+    """Emergency endpoint to clean up orphaned jobs and restart the job monitor"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        # Find all orphaned running jobs
+        orphaned_jobs = supabase.table("scraper_jobs").select("id", "job_type", "description").eq("status", JobStatus.RUNNING).execute()
+        
+        cleanup_results = []
+        
+        if orphaned_jobs.data:
+            print(f"🧹 Emergency cleanup: Found {len(orphaned_jobs.data)} orphaned jobs")
+            
+            for job in orphaned_jobs.data:
+                job_id = job["id"]
+                job_desc = job.get("description", f"Job {job_id}")
+                
+                # Mark as failed
+                supabase.table("scraper_jobs").update({
+                    "status": JobStatus.FAILED,
+                    "error_message": "Emergency cleanup - job was orphaned (server crashed)",
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", job_id).execute()
+                
+                # Clean up Redis data
+                redis_client = get_redis_client()
+                if redis_client:
+                    try:
+                        redis_client.delete(f"checkpoint:{job_id}")
+                        redis_client.delete(f"rescrape_job:{job_id}")
+                        redis_client.delete(f"csv_data:{job_id}")
+                    except Exception as redis_error:
+                        print(f"⚠️ Redis cleanup failed for {job_id}: {redis_error}")
+                
+                cleanup_results.append({
+                    "job_id": job_id,
+                    "description": job_desc,
+                    "status": "cleaned_up"
+                })
+        
+        # Try to restart the job monitor (though it should already be running)
+        try:
+            import threading
+            monitor_thread = threading.Thread(target=job_monitor)
+            monitor_thread.daemon = True
+            monitor_thread.start()
+            monitor_status = "restarted"
+        except Exception as monitor_error:
+            print(f"⚠️ Failed to restart monitor: {monitor_error}")
+            monitor_status = f"failed: {monitor_error}"
+        
+        # Check for pending/queued jobs that can now start
+        try:
+            start_next_queued_job()
+            queue_check = "attempted_to_start_next_job"
+        except Exception as queue_error:
+            queue_check = f"queue_check_failed: {queue_error}"
+        
+        return {
+            "message": f"Emergency cleanup completed. Found and cleaned up {len(orphaned_jobs.data)} orphaned jobs.",
+            "orphaned_jobs_cleaned": len(orphaned_jobs.data),
+            "cleanup_details": cleanup_results,
+            "monitor_status": monitor_status,
+            "queue_status": queue_check
+        }
+        
+    except Exception as e:
+        print(f"❌ Emergency cleanup error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

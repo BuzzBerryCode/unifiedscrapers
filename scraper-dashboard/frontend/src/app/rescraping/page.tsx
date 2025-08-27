@@ -17,7 +17,8 @@ import {
   FireIcon,
   BoltIcon,
   WrenchScrewdriverIcon,
-  ShieldExclamationIcon
+  ShieldExclamationIcon,
+  ExclamationCircleIcon
 } from '@heroicons/react/24/outline'
 
 interface RescrapeStats {
@@ -319,6 +320,37 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleEmergencyRestart = async () => {
+    if (!confirm('This will clean up any stuck/orphaned jobs and restart the job monitor. Continue?')) return
+    
+    setActionLoading('emergency-restart')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/emergency-restart-monitor`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        console.log('Emergency cleanup details:', result)
+        fetchData() // Refresh data
+      } else {
+        throw new Error('Failed to restart job monitor')
+      }
+    } catch (error) {
+      console.error('Error restarting job monitor:', error)
+      toast.error('Failed to restart job monitor')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -595,6 +627,28 @@ export default function RescrapeManagement() {
               Actions
             </h2>
             <div className="space-y-4">
+              {/* Emergency Restart Button */}
+              <div className={`p-4 border rounded-lg ${darkMode ? 'border-yellow-600 bg-yellow-900/10' : 'border-yellow-300 bg-yellow-50'}`}>
+                <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-yellow-300' : 'text-yellow-800'}`}>
+                  <ExclamationCircleIcon className="h-5 w-5 mr-2" />
+                  Emergency: Stuck Jobs?
+                </h3>
+                <p className={`text-sm mb-3 ${darkMode ? 'text-yellow-200' : 'text-yellow-700'}`}>
+                  If jobs are stuck or server crashed, use this to clean up orphaned jobs and restart the job monitor.
+                </p>
+                <button
+                  onClick={handleEmergencyRestart}
+                  disabled={actionLoading === 'emergency-restart'}
+                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50"
+                >
+                  {actionLoading === 'emergency-restart' ? (
+                    <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                  ) : (
+                    <ExclamationCircleIcon className="h-4 w-4 mr-2" />
+                  )}
+                  Emergency Restart Job Monitor
+                </button>
+              </div>
               {/* Populate Dates */}
               {(stats?.creators_need_dates || 0) > 0 && (
                 <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>

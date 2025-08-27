@@ -14,7 +14,8 @@ import {
   SunIcon,
   MoonIcon,
   ExclamationTriangleIcon,
-  FireIcon
+  FireIcon,
+  BoltIcon
 } from '@heroicons/react/24/outline'
 
 interface RescrapeStats {
@@ -219,6 +220,35 @@ export default function RescrapeManagement() {
     } catch (error) {
       console.error('Error starting overdue rescrape:', error)
       toast.error('Failed to start overdue rescraping')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
+  const handleStartTodaysBatch = async (platform: string) => {
+    setActionLoading(`todays-${platform}`)
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/start-todays-batch`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ platform })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        fetchData() // Refresh data
+      } else {
+        throw new Error('Failed to start today\'s batch rescraping')
+      }
+    } catch (error) {
+      console.error('Error starting today\'s batch rescrape:', error)
+      toast.error('Failed to start today\'s batch rescraping')
     } finally {
       setActionLoading('')
     }
@@ -573,6 +603,62 @@ export default function RescrapeManagement() {
                   </div>
                 </div>
               </div>
+
+              {/* Today's Missed Batch Section - Show when past scheduled time and creators still due */}
+              {(stats?.todays_scheduled_batch || 0) > 0 && 
+               stats?.weekly_schedule && 
+               Object.values(stats.weekly_schedule).some(day => day.is_today && day.is_past_time) && (
+                <div className={`p-4 border rounded-lg ${darkMode ? 'border-blue-600 bg-blue-900/10' : 'border-blue-300 bg-blue-50'}`}>
+                  <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-blue-300' : 'text-blue-800'}`}>
+                    <BoltIcon className="h-5 w-5 mr-2" />
+                    Rescrape Today&apos;s Missed Batch
+                  </h3>
+                  <p className={`text-sm mb-3 ${darkMode ? 'text-blue-200' : 'text-blue-700'}`}>
+                    {stats?.todays_scheduled_batch || 0} creators were scheduled for today&apos;s 8:00 AM rescrape but weren&apos;t processed. 
+                    Run them manually now.
+                  </p>
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleStartTodaysBatch('all')}
+                      disabled={actionLoading.startsWith('todays')}
+                      className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
+                    >
+                      {actionLoading === 'todays-all' ? (
+                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <BoltIcon className="h-4 w-4 mr-2" />
+                      )}
+                      Rescrape Today&apos;s Batch ({stats?.todays_scheduled_batch || 0})
+                    </button>
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => handleStartTodaysBatch('instagram')}
+                        disabled={actionLoading.startsWith('todays')}
+                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
+                      >
+                        {actionLoading === 'todays-instagram' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <PlayIcon className="h-4 w-4 mr-2" />
+                        )}
+                        Instagram Only
+                      </button>
+                      <button
+                        onClick={() => handleStartTodaysBatch('tiktok')}
+                        disabled={actionLoading.startsWith('todays')}
+                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+                      >
+                        {actionLoading === 'todays-tiktok' ? (
+                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <PlayIcon className="h-4 w-4 mr-2" />
+                        )}
+                        TikTok Only
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Overdue Creators Section */}
               {(stats?.remaining_overdue || 0) > 0 && (

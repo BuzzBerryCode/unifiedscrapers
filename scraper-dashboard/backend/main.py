@@ -133,6 +133,15 @@ def start_job_directly(job_id: str, job_type: str):
             elif job_type == "rescrape_overdue_tiktok":
                 from tasks import rescrape_platform_creators
                 rescrape_platform_creators(job_id, "tiktok")  # Filters to TikTok from Redis data
+            elif job_type == "rescrape_todays_batch_all":
+                from tasks import rescrape_all_creators
+                rescrape_all_creators(job_id)  # Use same function, data comes from Redis
+            elif job_type == "rescrape_todays_batch_instagram":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "instagram")  # Filters to Instagram from Redis data
+            elif job_type == "rescrape_todays_batch_tiktok":
+                from tasks import rescrape_platform_creators
+                rescrape_platform_creators(job_id, "tiktok")  # Filters to TikTok from Redis data
             else:
                 print(f"❌ Unknown job type: {job_type}")
                 return
@@ -1295,6 +1304,91 @@ async def start_overdue_rescrape(request: dict, current_user: str = Depends(veri
         
     except Exception as e:
         print(f"Overdue rescrape error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rescraping/start-todays-batch")
+async def start_todays_batch_rescrape(request: dict, current_user: str = Depends(verify_token)):
+    """Start rescraping for today's missed batch (exactly 7 days old creators)"""
+    try:
+        platform = request.get("platform", "all")  # all, instagram, tiktok
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+        
+        from datetime import datetime, timedelta
+        
+        # Get creators updated exactly 7 days ago (today's scheduled batch)
+        seven_days_ago_start = (datetime.utcnow() - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0)
+        seven_days_ago_end = seven_days_ago_start + timedelta(days=1)
+        
+        # Build query based on platform
+        query = supabase.table("creatordata").select("id", "handle", "platform", "updated_at")
+        
+        if platform == "instagram":
+            query = query.eq("platform", "instagram")
+        elif platform == "tiktok":
+            query = query.eq("platform", "tiktok")
+        
+        # Get today's batch (exactly 7 days old) + any null dates
+        todays_batch = query.gte("updated_at", seven_days_ago_start.isoformat()).lt("updated_at", seven_days_ago_end.isoformat()).order("updated_at").execute()
+        null_creators = supabase.table("creatordata").select("id", "handle", "platform").is_("updated_at", "null").limit(50).execute()
+        
+        all_creators = todays_batch.data + null_creators.data
+        
+        if not all_creators:
+            return {"message": "No creators from today's batch found", "job_id": None}
+        
+        # Create rescraping job
+        job_id = str(uuid.uuid4())
+        job_type_map = {
+            "all": "rescrape_todays_batch_all",
+            "instagram": "rescrape_todays_batch_instagram", 
+            "tiktok": "rescrape_todays_batch_tiktok"
+        }
+        
+        # Check if there are running jobs
+        running_jobs = check_running_jobs()
+        initial_status = JobStatus.QUEUED if running_jobs else JobStatus.PENDING
+        
+        job_data = {
+            "id": job_id,
+            "job_type": job_type_map[platform],
+            "status": initial_status,
+            "total_items": len(all_creators),
+            "processed_items": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "updated_at": datetime.utcnow().isoformat(),
+            "description": f"Today's missed batch: {len(todays_batch.data)} due today + {len(null_creators.data)} null dates ({platform})"
+        }
+        
+        supabase.table("scraper_jobs").insert(job_data).execute()
+        
+        # Store creator list in Redis
+        redis_client = get_redis_client()
+        redis_key = f"rescrape_job:{job_id}"
+        
+        creator_data = {
+            "creators": all_creators,
+            "platform_filter": platform,
+            "job_type": job_data["job_type"]
+        }
+        
+        redis_client.setex(redis_key, 86400, json.dumps(creator_data))  # 24 hours TTL
+        
+        return {
+            "message": f"Started today's batch rescraping for {len(all_creators)} creators",
+            "job_id": job_id,
+            "total_creators": len(all_creators),
+            "todays_batch": len(todays_batch.data),
+            "null_date_creators": len(null_creators.data),
+            "platform": platform,
+            "status": initial_status
+        }
+        
+    except Exception as e:
+        print(f"Today's batch rescrape error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

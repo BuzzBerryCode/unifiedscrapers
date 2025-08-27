@@ -2018,6 +2018,98 @@ async def emergency_restart_monitor(current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/jobs/force-kill-all")
+async def force_kill_all_background_processes(current_user: str = Depends(verify_token)):
+    """NUCLEAR OPTION: Force kill all background scraping processes"""
+    try:
+        import os
+        import subprocess
+        
+        killed_processes = []
+        cleanup_results = []
+        
+        # First, clean up database and Redis like emergency restart
+        supabase = get_supabase_client()
+        if supabase:
+            # Mark all running jobs as failed
+            running_jobs = supabase.table("scraper_jobs").select("id", "description").eq("status", JobStatus.RUNNING).execute()
+            
+            for job in running_jobs.data:
+                job_id = job["id"]
+                job_desc = job.get("description", f"Job {job_id}")
+                
+                # Mark as failed
+                supabase.table("scraper_jobs").update({
+                    "status": JobStatus.FAILED,
+                    "error_message": "Force killed - background process termination",
+                    "updated_at": datetime.utcnow().isoformat()
+                }).eq("id", job_id).execute()
+                
+                # Clean up Redis data
+                redis_client = get_redis_client()
+                if redis_client:
+                    try:
+                        redis_client.delete(f"checkpoint:{job_id}")
+                        redis_client.delete(f"rescrape_job:{job_id}")
+                        redis_client.delete(f"csv_data:{job_id}")
+                    except Exception:
+                        pass
+                
+                cleanup_results.append({
+                    "job_id": job_id,
+                    "description": job_desc,
+                    "status": "database_cleaned"
+                })
+        
+        # Try to find and kill Python processes with scraping-related names
+        try:
+            # Kill processes by name patterns
+            kill_patterns = [
+                "UnifiedRescaper",
+                "UnifiedScraper", 
+                "rescrape_",
+                "process_new_creators",
+                "scraper_jobs"
+            ]
+            
+            for pattern in kill_patterns:
+                try:
+                    # Use pkill to find and kill processes matching the pattern
+                    result = subprocess.run(['pkill', '-f', pattern], 
+                                          capture_output=True, text=True, timeout=10)
+                    if result.returncode == 0:
+                        killed_processes.append(f"Killed processes matching: {pattern}")
+                    else:
+                        killed_processes.append(f"No processes found for: {pattern}")
+                except subprocess.TimeoutExpired:
+                    killed_processes.append(f"Timeout killing: {pattern}")
+                except Exception as kill_error:
+                    killed_processes.append(f"Error killing {pattern}: {str(kill_error)}")
+        
+        except Exception as process_error:
+            killed_processes.append(f"Process killing failed: {str(process_error)}")
+        
+        # Set a global flag to stop job monitor loops
+        try:
+            redis_client = get_redis_client()
+            if redis_client:
+                redis_client.set("FORCE_STOP_ALL_JOBS", "true", ex=300)  # 5 minute flag
+        except Exception:
+            pass
+        
+        return {
+            "message": "Force kill executed - all background scraping processes terminated",
+            "database_cleanup": len(cleanup_results),
+            "cleanup_details": cleanup_results,
+            "process_termination": killed_processes,
+            "warning": "This is a nuclear option - restart your server to resume normal operation"
+        }
+        
+    except Exception as e:
+        print(f"❌ Force kill error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8000))

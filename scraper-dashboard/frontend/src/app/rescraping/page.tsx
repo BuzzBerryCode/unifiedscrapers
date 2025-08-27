@@ -351,6 +351,40 @@ export default function RescrapeManagement() {
     }
   }
 
+  const handleForceKillAll = async () => {
+    if (!confirm('🚨 NUCLEAR OPTION: This will forcefully kill ALL background scraping processes on the server. This should only be used when processes are completely stuck. The server may need to be restarted afterward. Continue?')) return
+    
+    setActionLoading('force-kill')
+    try {
+      const token = localStorage.getItem('token')
+      
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/force-kill-all`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        toast.success(result.message)
+        console.log('Force kill details:', result)
+        if (result.warning) {
+          toast.error(result.warning, { duration: 10000 })
+        }
+        fetchData() // Refresh data
+      } else {
+        throw new Error('Failed to force kill processes')
+      }
+    } catch (error) {
+      console.error('Error force killing processes:', error)
+      toast.error('Failed to force kill processes')
+    } finally {
+      setActionLoading('')
+    }
+  }
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -634,20 +668,35 @@ export default function RescrapeManagement() {
                   Emergency: Stuck Jobs?
                 </h3>
                 <p className={`text-sm mb-3 ${darkMode ? 'text-yellow-200' : 'text-yellow-700'}`}>
-                  If jobs are stuck or server crashed, use this to clean up orphaned jobs and restart the job monitor.
+                  If jobs are stuck or server crashed, try <strong>Emergency Restart</strong> first. If processes are still running, use <strong className="text-red-600">Force Kill</strong> as a last resort.
                 </p>
-                <button
-                  onClick={handleEmergencyRestart}
-                  disabled={actionLoading === 'emergency-restart'}
-                  className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50"
-                >
-                  {actionLoading === 'emergency-restart' ? (
-                    <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <ExclamationCircleIcon className="h-4 w-4 mr-2" />
-                  )}
-                  Emergency Restart Job Monitor
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <button
+                    onClick={handleEmergencyRestart}
+                    disabled={actionLoading === 'emergency-restart'}
+                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'emergency-restart' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <ExclamationCircleIcon className="h-4 w-4 mr-2" />
+                    )}
+                    Emergency Restart Job Monitor
+                  </button>
+                  
+                  <button
+                    onClick={handleForceKillAll}
+                    disabled={actionLoading === 'force-kill'}
+                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
+                  >
+                    {actionLoading === 'force-kill' ? (
+                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <FireIcon className="h-4 w-4 mr-2" />
+                    )}
+                    🚨 FORCE KILL ALL PROCESSES
+                  </button>
+                </div>
               </div>
               {/* Populate Dates */}
               {(stats?.creators_need_dates || 0) > 0 && (

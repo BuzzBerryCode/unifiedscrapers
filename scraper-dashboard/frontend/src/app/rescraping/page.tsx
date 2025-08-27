@@ -375,13 +375,13 @@ export default function RescrapeManagement() {
               <CalendarIcon className="h-8 w-8 text-green-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Today&apos;s Batch
+                  Due Today
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                   {stats?.todays_scheduled_batch?.toLocaleString() || 0}
                 </p>
                 <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Scheduled
+                  7 days old
                 </p>
               </div>
             </div>
@@ -398,7 +398,7 @@ export default function RescrapeManagement() {
                   {stats?.remaining_overdue?.toLocaleString() || 0}
                 </p>
                 <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Need attention
+                  8+ days old
                 </p>
               </div>
             </div>
@@ -582,8 +582,8 @@ export default function RescrapeManagement() {
                     Cleanup Overdue Creators
                   </h3>
                   <p className={`text-sm mb-3 ${darkMode ? 'text-orange-200' : 'text-orange-700'}`}>
-                    {stats?.remaining_overdue || 0} creators are overdue and need immediate attention. 
-                    These are likely the ones with API failures before the recent fixes.
+                    {stats?.remaining_overdue || 0} creators are truly overdue (8+ days old) and need immediate attention. 
+                    These missed their scheduled rescrape window and should be processed separately.
                   </p>
                   <div className="space-y-2">
                     <button

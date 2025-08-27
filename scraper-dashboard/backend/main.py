@@ -861,10 +861,15 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
         recent_jobs = supabase.table("scraper_jobs").select("*").in_("job_type", ["rescrape_all", "rescrape_instagram", "rescrape_tiktok", "daily_rescrape"]).order("created_at", desc=True).limit(10).execute()
         
         # Get additional breakdown for better UI
-        # Count ALL overdue creators (7+ days old)
+        # Count truly overdue creators (MORE than 7 days old - 8+ days)
+        eight_days_ago = (datetime.utcnow() - timedelta(days=8)).isoformat()
+        truly_overdue_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", eight_days_ago).execute()
+        truly_overdue = truly_overdue_response.count
+        
+        # Count ALL creators 7+ days old (for daily rescraping)
         seven_days_ago_total = (datetime.utcnow() - timedelta(days=7)).isoformat()
-        overdue_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago_total).execute()
-        total_overdue = overdue_response.count
+        total_overdue_response = supabase.table("creatordata").select("id", count="exact").lt("updated_at", seven_days_ago_total).execute()
+        total_overdue = total_overdue_response.count
         
         # Count just today's batch (exactly 7 days ago)
         todays_batch = due_response.count  # This is from the existing query above
@@ -873,9 +878,9 @@ async def get_rescraping_stats(current_user: str = Depends(verify_token)):
             "total_creators": total_creators,
             "creators_need_dates": creators_need_dates,
             "creators_due_rescrape": creators_due,  # Today's batch + null dates
-            "total_overdue_creators": total_overdue,  # ALL overdue (7+ days)
+            "total_overdue_creators": total_overdue,  # ALL overdue (7+ days) - used by daily job
             "todays_scheduled_batch": todays_batch,  # Just today's exact batch
-            "remaining_overdue": max(0, total_overdue + creators_need_dates - todays_batch),  # The "extra" ones
+            "remaining_overdue": truly_overdue + creators_need_dates,  # Actually overdue (8+ days) + null dates
             "weekly_schedule": schedule,
             "recent_jobs": recent_jobs.data,
             "schedule_info": {
@@ -1221,7 +1226,8 @@ async def start_overdue_rescrape(request: dict, current_user: str = Depends(veri
         
         from datetime import datetime, timedelta
         
-        seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        # Use 8+ days for truly overdue creators (not just due today)
+        eight_days_ago = (datetime.utcnow() - timedelta(days=8)).isoformat()
         
         # Build query based on platform
         query = supabase.table("creatordata").select("id", "handle", "platform", "updated_at")
@@ -1231,8 +1237,8 @@ async def start_overdue_rescrape(request: dict, current_user: str = Depends(veri
         elif platform == "tiktok":
             query = query.eq("platform", "tiktok")
         
-        # Get ALL overdue creators (7+ days old) + those with null dates
-        overdue_creators = query.lt("updated_at", seven_days_ago).order("updated_at").limit(max_creators).execute()
+        # Get truly overdue creators (8+ days old) + those with null dates
+        overdue_creators = query.lt("updated_at", eight_days_ago).order("updated_at").limit(max_creators).execute()
         null_creators = supabase.table("creatordata").select("id", "handle", "platform").is_("updated_at", "null").limit(50).execute()
         
         all_creators = overdue_creators.data + null_creators.data
@@ -1260,7 +1266,7 @@ async def start_overdue_rescrape(request: dict, current_user: str = Depends(veri
             "processed_items": 0,
             "created_at": datetime.utcnow().isoformat(),
             "updated_at": datetime.utcnow().isoformat(),
-            "description": f"Overdue cleanup: {len(overdue_creators.data)} overdue + {len(null_creators.data)} null dates ({platform})"
+            "description": f"Overdue cleanup: {len(overdue_creators.data)} truly overdue (8+ days) + {len(null_creators.data)} null dates ({platform})"
         }
         
         supabase.table("scraper_jobs").insert(job_data).execute()

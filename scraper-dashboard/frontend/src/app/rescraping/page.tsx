@@ -7,7 +7,6 @@ import { toast, Toaster } from 'react-hot-toast'
 import { 
   ArrowPathIcon,
   CalendarIcon,
-  ChartBarIcon,
   ClockIcon,
   UserGroupIcon,
   PlayIcon,
@@ -376,7 +375,7 @@ export default function RescrapeManagement() {
               <CalendarIcon className="h-8 w-8 text-green-500" />
               <div className="ml-4">
                 <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Today's Batch
+                  Today&apos;s Batch
                 </p>
                 <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
                   {stats?.todays_scheduled_batch?.toLocaleString() || 0}

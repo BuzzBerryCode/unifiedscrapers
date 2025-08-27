@@ -188,7 +188,12 @@ def calculate_buzz_score(new_data, existing_data):
     else:
         avg_likes_now = avg_likes_data or 0
     
-    avg_comments_now = new_data.get('average_comments', 0)
+    # Handle different average_comments formats
+    avg_comments_data = new_data.get('average_comments', 0)
+    if isinstance(avg_comments_data, dict):
+        avg_comments_now = avg_comments_data.get('avg_value', 0)
+    else:
+        avg_comments_now = avg_comments_data or 0
 
     # Prepare Historical Data
     views_last_week = [
@@ -206,7 +211,12 @@ def calculate_buzz_score(new_data, existing_data):
     else:
         avg_likes_last_week = old_likes_data or 0
     
-    avg_comments_last_week = existing_data.get('average_comments', 0)
+    # Handle different average_comments formats for historical data
+    old_comments_data = existing_data.get('average_comments', 0)
+    if isinstance(old_comments_data, dict):
+        avg_comments_last_week = old_comments_data.get('avg_value', 0)
+    else:
+        avg_comments_last_week = old_comments_data or 0
 
     # Growth Score
     view_growth = (median_views_now - median_views_last_week) / median_views_last_week if median_views_last_week else 0
@@ -952,11 +962,24 @@ async def rescrape_and_update_creator(creator):
             return {'handle': handle, 'status': 'failed', 'error': 'Incomplete API data - zero followers detected'}
         
         # Check if we have engagement metrics (views, likes, or engagement_rate)
+        # Handle different formats for engagement_rate and average_comments
+        engagement_rate_raw = new_data.get('engagement_rate', 0)
+        if isinstance(engagement_rate_raw, dict):
+            engagement_rate_val = engagement_rate_raw.get('avg_value', 0)
+        else:
+            engagement_rate_val = engagement_rate_raw or 0
+            
+        avg_comments_raw = new_data.get('average_comments', 0)
+        if isinstance(avg_comments_raw, dict):
+            avg_comments_val = avg_comments_raw.get('avg_value', 0)
+        else:
+            avg_comments_val = avg_comments_raw or 0
+        
         has_engagement_data = (
             avg_views > 0 or 
             avg_likes > 0 or 
-            new_data.get('engagement_rate', 0) > 0 or
-            new_data.get('average_comments', 0) > 0
+            engagement_rate_val > 0 or
+            avg_comments_val > 0
         )
         
         if not has_engagement_data:

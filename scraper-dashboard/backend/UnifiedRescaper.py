@@ -22,6 +22,13 @@ import signal
 from functools import wraps
 import sys
 
+# Add current directory to path for API reliability fix
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
+
+from api_reliability_fix import make_instagram_api_call, make_tiktok_api_call, format_error_summary
+
 # ==================== TIMEOUT PROTECTION ====================
 # Using asyncio-based timeouts instead of signal-based ones for better compatibility
 
@@ -497,104 +504,85 @@ def safe_get(data, keys, default=None):
     except (KeyError, TypeError, IndexError):
         return default
 
+def calculate_engagement_rate(likes, comments, followers):
+    """Calculate engagement rate percentage"""
+    if followers == 0:
+        return 0.0
+    return round(((likes + comments) / followers) * 100, 2)
+
 # ==================== INSTAGRAM SCRAPING FUNCTIONS ====================
 
 def scrape_instagram_user_data(username):
-    """Scrapes Instagram profile and post data for a given username."""
+    """Improved Instagram scraper with reliable API calls and better error handling."""
     print(f"\n📡 Fetching Instagram data for @{username}...")
+    username = username.strip().lstrip("@")
     
-    # Profile Data
-    profile_url = f"https://api.scrapecreators.com/v1/instagram/profile?handle={username}"
-    headers = {"x-api-key": SCRAPECREATORS_API_KEY}
+    # Step 1: Get profile data with reliable API call
+    profile_result = make_instagram_api_call(username, SCRAPECREATORS_API_KEY, "profile")
     
-    print(f"📡 Fetching profile data from API...")
+    if not profile_result['success']:
+        error_type = profile_result['error_type']
+        error_msg = profile_result['error_message']
+        
+        print(f"❌ Profile API call failed for @{username}: {error_msg}")
+        
+        # Handle different error types appropriately
+        if error_type == 'profile_not_found':
+            print(f"👻 Profile not found for @{username} - likely deleted account")
+            return None  # Permanent failure - remove from database
+        elif error_type == 'access_denied':
+            print(f"🔒 Access denied for @{username} - likely private account")
+            return {'error': 'temporary', 'message': 'Account went private - retry later'}
+        elif error_type in ['rate_limited', 'server_error', 'timeout', 'circuit_breaker']:
+            print(f"⏳ Temporary API issue for @{username}: {error_type}")
+            return {'error': 'temporary', 'message': f'API issue: {error_type} - will retry'}
+        else:
+            print(f"❓ Unknown error for @{username}: {error_type}")
+            return {'error': 'unknown', 'message': f'Unknown error: {error_msg}'}
     
-    # Add retry logic for API calls
-    max_retries = 3
-    retry_delay = 2  # seconds
+    # Parse profile data
+    try:
+        profile_data = profile_result['data'].get("data", {}).get("user", {})
+        if not profile_data:
+            print(f"❌ Empty profile data for @{username}")
+            return {'error': 'temporary', 'message': 'Empty API response - retry later'}
+        
+        full_name = profile_data.get("full_name", "")
+        bio = profile_data.get("biography", "")
+        avatar_url = profile_data.get("profile_pic_url_hd", "")
+        followers = profile_data.get("edge_followed_by", {}).get("count", 0)
+        
+        print(f"📊 Profile data: {followers:,} followers")
+        
+    except Exception as e:
+        print(f"❌ Error parsing profile data for @{username}: {e}")
+        return {'error': 'temporary', 'message': f'Data parsing error: {e}'}
     
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for @{username}")
-                time.sleep(retry_delay * attempt)  # Exponential backoff
-            
-            profile_response = requests.get(profile_url, headers=headers, timeout=20)
-            
-            if profile_response.status_code == 200:
-                break  # Success
-            elif profile_response.status_code == 429:
-                print(f"⏳ Rate limited for @{username}, waiting {retry_delay * (attempt + 1)} seconds...")
-                time.sleep(retry_delay * (attempt + 1))
-                continue
-            elif profile_response.status_code in [500, 502, 503, 504]:
-                print(f"🔄 Server error {profile_response.status_code} for @{username}, retrying...")
-                continue
-            else:
-                print(f"❌ Failed to fetch Instagram profile data for @{username}: {profile_response.status_code} - {profile_response.text}")
-                return None
-                
-        except requests.RequestException as e:
-            print(f"❌ API request failed for @{username} (attempt {attempt + 1}): {e}")
-            if attempt == max_retries - 1:
-                return None
-            continue
-    else:
-        print(f"❌ All {max_retries} attempts failed for @{username}")
-        return None
-    
-    profile_data = profile_response.json().get("data", {}).get("user", {})
-    if not profile_data:
-        print(f"❌ No Instagram profile data found for @{username}")
-        return None
-
-    # Process profile data first
-    followers = profile_data.get("edge_followed_by", {}).get("count", 0)
-    bio = profile_data.get("biography", "")
-
-    # Check follower range BEFORE making posts API call to save credits
-    if not (10_000 <= followers <= 350_000):
-        print(f"🚫 Skipping @{username}: Follower count {followers} out of range (10k-350k).")
-        print(f"💰 Saved 1 API credit by checking followers first!")
+    # Check follower range early
+    if not (10000 <= followers <= 350000):
+        print(f"🚫 Skipping: Follower count {followers:,} not in 10k–350k range.")
         return {'skipped': True}
-
-    # Posts Data - only fetch if follower count is in range
-    posts_url = f"https://api.scrapecreators.com/v2/instagram/user/posts?handle={username}"
     
-    print(f"📡 Fetching posts data from API...")
-    posts_data = []
+    # Step 2: Get posts data with reliable API call
+    posts_result = make_instagram_api_call(username, SCRAPECREATORS_API_KEY, "posts")
     
-    # Add retry logic for posts API
-    for attempt in range(max_retries):
-        try:
-            if attempt > 0:
-                print(f"   🔄 Retry attempt {attempt + 1}/{max_retries} for posts @{username}")
-                time.sleep(retry_delay * attempt)
-            
-            posts_response = requests.get(posts_url, headers=headers, timeout=20)
-            
-            if posts_response.status_code == 200:
-                posts_data = posts_response.json().get("items", [])
-                break
-            elif posts_response.status_code == 429:
-                print(f"⏳ Rate limited for posts @{username}, waiting {retry_delay * (attempt + 1)} seconds...")
-                time.sleep(retry_delay * (attempt + 1))
-                continue
-            elif posts_response.status_code in [500, 502, 503, 504]:
-                print(f"🔄 Server error {posts_response.status_code} for posts @{username}, retrying...")
-                continue
-            else:
-                print(f"⚠️ Posts API returned {posts_response.status_code} for @{username}, continuing with empty posts")
-                posts_data = []
-                break
-                
-        except requests.RequestException as e:
-            print(f"❌ Posts API request failed for @{username} (attempt {attempt + 1}): {e}")
-            if attempt == max_retries - 1:
-                posts_data = []
-            continue
-
-    print(f"✅ Fetched Instagram profile and {len(posts_data)} posts for @{username}.")
+    if not posts_result['success']:
+        error_type = posts_result['error_type']
+        error_msg = posts_result['error_message']
+        
+        print(f"❌ Posts API call failed for @{username}: {error_msg}")
+        
+        # For posts, we might be able to continue with just profile data
+        if error_type in ['rate_limited', 'server_error', 'timeout', 'circuit_breaker']:
+            print(f"⏳ Using profile-only data due to posts API issue: {error_type}")
+            # We'll create a minimal data set with just profile info
+            posts_data = []
+        else:
+            return {'error': 'temporary', 'message': f'Posts API failed: {error_type}'}
+    else:
+        posts_data = posts_result['data'].get("items", [])
+    
+    print(f"📱 Found {len(posts_data)} posts")
 
     # Process Posts
     likes_list, comments_list, views_list = [], [], []
@@ -725,115 +713,155 @@ def scrape_instagram_user_data(username):
 # ==================== TIKTOK SCRAPING FUNCTIONS ====================
 
 def scrape_tiktok_user_data(username):
-    """Scrapes TikTok profile and post data for a given username."""
+    """Improved TikTok scraper with reliable API calls and better error handling."""
     print(f"\n📡 Fetching TikTok data for @{username}...")
+    username = username.strip().lstrip("@")
     
-    api_url = f"https://api.scrapecreators.com/v3/tiktok/profile/videos?handle={username}"
-    headers = {"x-api-key": SCRAPECREATORS_API_KEY}
-    response = requests.get(api_url, headers=headers)
-
-    if response.status_code != 200:
-        print(f"❌ Failed to fetch TikTok data for @{username}: {response.status_code}")
-        return None
-
-    posts = response.json().get('aweme_list', [])
-    if not posts:
-        print("❌ No TikTok posts found for this account")
-        return None
-
-    user_info = posts[0].get('author', {})
-    bio = user_info.get('signature', '')
-    followers = user_info.get('follower_count', 0)
-
-    # Check follower range immediately (TikTok API returns profile + posts in one call, so no credit savings here)
-    if not (10000 <= followers <= 350000):
-        print(f"❌ Skipped: TikTok follower count {followers} outside target range")
-        print(f"ℹ️ Note: TikTok API returns profile + posts in one call, so no credit savings possible")
-        return {'skipped': True}
-
-    likes_list, comments_list, views_list, all_hashtags, all_tagged_users, recent_posts, past_ad_placements, all_captions = [], [], [], [], [], [], [], []
-
-    for post in posts[:12]:
-        caption = post.get('desc', '')
-        stats = post.get('statistics', {})
-        likes = stats.get('digg_count', 0)
-        comments = stats.get('comment_count', 0)
-        views = stats.get('play_count', 0)
-        hashtags = [tag.lower() for tag in re.findall(r"#(\w+)", caption or "")]
-        tagged_users = re.findall(r"@(\w+)", caption or "")
-        video_url = post.get('video', {}).get('ai_dynamic_cover', {}).get('url_list', [''])[0]
-
-        # Extract TikTok posting time
-        created_at = None
-        create_time = post.get('create_time')
-        if create_time:
-            try:
-                created_at = datetime.fromtimestamp(create_time).isoformat()
-            except (ValueError, TypeError):
-                created_at = None
-
-        likes_list.append(likes)
-        comments_list.append(comments)
-        views_list.append(views)
-        all_hashtags.extend(hashtags)
-        all_tagged_users.extend(tagged_users)
-        all_captions.append(caption)
-
-        recent_posts.append({
-            "caption": caption,
-            "likes": likes,
-            "comments": comments,
-            "views": views,
-            "video_url": video_url,
-            "hashtags": hashtags,
-            "brand_tags": tagged_users,
-            "created_at": created_at
-        })
-
-    # Calculate averages based on the last 9 of 12 posts
-    print("📊 Calculating TikTok metrics based on the last 9 of the 12 posts...")
+    # Make reliable API call
+    result = make_tiktok_api_call(username, SCRAPECREATORS_API_KEY)
     
-    likes_for_calc = likes_list[3:]
-    comments_for_calc = comments_list[3:]
-    views_for_calc = views_list[3:]
+    if not result['success']:
+        error_type = result['error_type']
+        error_msg = result['error_message']
+        
+        print(f"❌ TikTok API call failed for @{username}: {error_msg}")
+        
+        # Handle different error types
+        if error_type == 'profile_not_found':
+            print(f"👻 TikTok profile not found for @{username}")
+            return None  # Permanent failure
+        elif error_type in ['rate_limited', 'server_error', 'timeout', 'circuit_breaker']:
+            return {'error': 'temporary', 'message': f'API issue: {error_type}'}
+        else:
+            return {'error': 'unknown', 'message': f'Unknown error: {error_msg}'}
+    
+    # Parse TikTok data
+    try:
+        api_data = result['data']
+        posts = api_data.get('aweme_list', [])
+        
+        if not posts:
+            print("❌ No TikTok posts found for this account")
+            return {'error': 'temporary', 'message': 'No posts found - account may be private'}
+        
+        user_info = posts[0].get('author', {})
+        bio = user_info.get('signature', '')
+        followers = user_info.get('follower_count', 0)
+        
+        print(f"📊 TikTok profile: {followers:,} followers")
+        
+        # Check follower range
+        if not (10000 <= followers <= 350000):
+            print(f"❌ Skipped: TikTok follower count {followers:,} outside target range")
+            return {'skipped': True}
+        
+        # Process posts
+        likes_list, comments_list, views_list = [], [], []
+        all_hashtags, all_tagged_users, recent_posts = [], [], []
+        past_ad_placements, all_captions = [], []
 
-    avg_likes = sum(likes_for_calc) // len(likes_for_calc) if likes_for_calc else 0
-    avg_comments = sum(comments_for_calc) // len(comments_for_calc) if comments_for_calc else 0
-    avg_views = sum(views_for_calc) // len(views_for_calc) if views_for_calc else 0
+        for post in posts[:12]:
+            caption = post.get('desc', '')
+            stats = post.get('statistics', {})
+            likes = stats.get('digg_count', 0)
+            comments = stats.get('comment_count', 0)
+            views = stats.get('play_count', 0)
+            hashtags = [tag.lower() for tag in re.findall(r"#(\w+)", caption or "")]
+            tagged_users = re.findall(r"@(\w+)", caption or "")
+            
+            # Extract posting time
+            created_at = None
+            create_time = post.get('create_time')
+            if create_time:
+                try:
+                    created_at = datetime.fromtimestamp(create_time).isoformat()
+                except (ValueError, TypeError):
+                    created_at = None
 
-    total_likes_for_calc = sum(likes_for_calc)
-    total_comments_for_calc = sum(comments_for_calc)
-    engagement_rate = round(((total_likes_for_calc + total_comments_for_calc) / followers) * 100, 2) if followers and likes_for_calc else 0
+            # Get video URL
+            video_url = ""
+            video_data = post.get('video', {})
+            if video_data:
+                play_addr = video_data.get('play_addr', {})
+                if play_addr and play_addr.get('url_list'):
+                    video_url = play_addr['url_list'][0]
 
-    # Final structured data
-    influencer_data = {
-        "handle": username,
-        "display_name": user_info.get('nickname', ''),
-        "profile_url": f"https://tiktok.com/@{username}",
-        "profile_image_url": user_info.get('avatar_larger', {}).get('url_list', [''])[0],
-        "bio": bio,
-        "platform": "TikTok",
-        "followers_count": followers,
-        "average_views": avg_views,
-        "average_likes": avg_likes,
-        "average_comments": avg_comments,
-        "engagement_rate": float(engagement_rate),
-        "hashtags": list(set(all_hashtags)),
-        "email": (re.findall(r"\b[\w\.-]+@[\w\.-]+\.\w{2,4}\b", bio) or [None])[0],
-        "past_ad_placements": list(set(past_ad_placements)),
-        "bio_links": "",
-    }
+            # Check for paid partnerships
+            is_partnership = post.get("commerce_info", {}).get("bc_label_test_text", "") == "Paid partnership"
+            if is_partnership and tagged_users:
+                past_ad_placements.extend(tagged_users)
 
-    for i in range(min(12, len(recent_posts))):
-        influencer_data[f"recent_post_{i+1}"] = recent_posts[i]
+            all_hashtags.extend(hashtags)
+            all_tagged_users.extend(tagged_users)
+            likes_list.append(likes)
+            comments_list.append(comments)
+            views_list.append(views)
+            all_captions.append(caption)
 
-    # Check if creator has posted in the last 45 days
-    print("\n📅 Checking TikTok creator activity...")
-    if not is_creator_active(recent_posts, days_threshold=45):
-        print(f"🚫 Skipping @{username}: No posts in the last 45 days")
-        return {'skipped': True}
+            recent_posts.append({
+                "caption": caption,
+                "likes": likes,
+                "comments": comments,
+                "views": views,
+                "hashtags": hashtags,
+                "tagged_users": tagged_users,
+                "video_url": video_url,
+                "is_paid_partnership": is_partnership,
+                "is_video": True,
+                "is_carousel": False,
+                "created_at": created_at
+            })
 
-    return influencer_data
+        # Calculate averages (using posts 4-12)
+        likes_for_calc = likes_list[3:12]
+        comments_for_calc = comments_list[3:12]
+        views_for_calc = views_list[3:12]
+
+        avg_likes = sum(likes_for_calc) // len(likes_for_calc) if likes_for_calc else 0
+        avg_comments = sum(comments_for_calc) // len(comments_for_calc) if comments_for_calc else 0
+        avg_views = sum(views_for_calc) // len(views_for_calc) if views_for_calc else 0
+        engagement_rate = calculate_engagement_rate(sum(likes_for_calc), sum(comments_for_calc), followers)
+
+        print(f"📈 TikTok metrics: {avg_likes:,} likes, {avg_comments:,} comments, {engagement_rate}% engagement")
+
+        # Check activity
+        if not is_creator_active(recent_posts, days_threshold=45):
+            print(f"🚫 TikTok creator @{username} is inactive")
+            return {'skipped': True, 'reason': 'inactive'}
+
+        # Build data structure
+        influencer_data = {
+            "handle": user_info.get('unique_id', username),
+            "display_name": user_info.get('nickname', ''),
+            "profile_url": f"https://www.tiktok.com/@{user_info.get('unique_id', username)}",
+            "profile_image_url": user_info.get('avatar_thumb', {}).get('url_list', [''])[0],
+            "bio": bio,
+            "platform": "TikTok",
+            "followers_count": followers,
+            "average_views": avg_views,
+            "average_likes": avg_likes,
+            "average_comments": avg_comments,
+            "engagement_rate": float(engagement_rate),
+            "hashtags": list(set(all_hashtags)),
+            "brand_tags": list(set(all_tagged_users)),
+            "past_ad_placements": list(set(past_ad_placements)),
+            "bio_links": "",
+            "email": (re.findall(r"\b[\w\.-]+@[\w\.-]+\.\w{2,4}\b", bio) or [None])[0]
+        }
+
+        # Add recent posts
+        for i in range(min(12, len(recent_posts))):
+            influencer_data[f"recent_post_{i+1}"] = recent_posts[i]
+
+        print(f"✅ Successfully processed TikTok data for @{username}")
+        return influencer_data
+        
+    except Exception as e:
+        print(f"❌ Error processing TikTok data for @{username}: {e}")
+        traceback.print_exc()
+        return {'error': 'temporary', 'message': f'Data processing error: {e}'}
+
+
 
 # ==================== DATABASE FUNCTIONS ====================
 
@@ -880,18 +908,34 @@ async def rescrape_and_update_creator(creator):
         
         if not new_data:
             print(f"ℹ️ No data returned for @{handle}, skipping update.")
-            return {'handle': handle, 'status': 'failed', 'error': 'No data returned'}
+            return {'handle': handle, 'status': 'failed', 'error': 'API failure - no data returned'}
         
-        # Check if creator was skipped due to inactivity
-        if new_data.get('skipped'):
-            print(f"🗑️ Deleting inactive creator @{handle} from database...")
-            try:
-                supabase.table("creatordata").delete().eq("handle", handle).execute()
-                print(f"✅ Successfully deleted inactive creator @{handle}")
-                return {'handle': handle, 'status': 'deleted', 'reason': 'inactive'}
-            except Exception as e:
-                print(f"❌ Error deleting inactive creator @{handle}: {e}")
-                return {'handle': handle, 'status': 'error', 'error': f'Delete failed: {e}'}
+        # Handle new improved error responses
+        elif isinstance(new_data, dict) and new_data.get('error'):
+            error_type = new_data.get('error', 'unknown')
+            error_msg = new_data.get('message', 'Unknown error')
+            if error_type == 'temporary':
+                print(f"⏳ Temporary error for @{handle}: {error_msg}")
+                return {'handle': handle, 'status': 'failed', 'error': f'Temporary API issue: {error_msg}'}
+            else:
+                print(f"❌ Permanent error for @{handle}: {error_msg}")
+                return {'handle': handle, 'status': 'failed', 'error': f'Permanent error: {error_msg}'}
+        
+        # Check if creator was skipped due to inactivity or out-of-range followers
+        elif isinstance(new_data, dict) and new_data.get('skipped'):
+            reason = new_data.get('reason', 'inactive')
+            if reason == 'inactive':
+                print(f"🗑️ Deleting inactive creator @{handle} from database...")
+                try:
+                    supabase.table("creatordata").delete().eq("handle", handle).execute()
+                    print(f"✅ Successfully deleted inactive creator @{handle}")
+                    return {'handle': handle, 'status': 'deleted', 'reason': 'inactive'}
+                except Exception as e:
+                    print(f"❌ Error deleting inactive creator @{handle}: {e}")
+                    return {'handle': handle, 'status': 'error', 'error': f'Delete failed: {e}'}
+            else:
+                print(f"🚫 Creator @{handle} skipped: {reason}")
+                return {'handle': handle, 'status': 'failed', 'error': f'Skipped: {reason}'}
 
         # Delete old media before processing new media
         delete_all_creator_media(handle)

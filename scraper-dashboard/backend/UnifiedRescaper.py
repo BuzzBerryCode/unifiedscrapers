@@ -939,7 +939,13 @@ async def rescrape_and_update_creator(creator):
         # If key metrics are missing or zero, it might indicate incomplete API data
         followers_count = new_data.get('followers_count', 0)
         avg_views = new_data.get('average_views', 0)
-        avg_likes = new_data.get('average_likes', 0)
+        
+        # Handle average_likes which can be a dict or number
+        avg_likes_raw = new_data.get('average_likes', 0)
+        if isinstance(avg_likes_raw, dict):
+            avg_likes = avg_likes_raw.get('avg_value', 0)
+        else:
+            avg_likes = avg_likes_raw or 0
         
         if followers_count == 0:
             print(f"⚠️ Warning: @{handle} has zero followers - possibly incomplete API data")

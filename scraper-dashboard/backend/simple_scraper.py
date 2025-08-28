@@ -372,11 +372,39 @@ class SimpleScraper:
                 print(f"⚠️ Buzz Score calculation failed: {e}")
                 new_data['buzz_score'] = existing_data.get('buzz_score', 50)
             
-            # Preserve important existing data
-            new_data['primary_niche'] = existing_data.get('primary_niche') or new_data.get('primary_niche', '')
-            new_data['secondary_niche'] = existing_data.get('secondary_niche') or new_data.get('secondary_niche', '')
+            # Preserve important existing data - NEVER overwrite with empty values
+            # Only update niches if new data actually has valid niche information
+            if existing_data.get('primary_niche') and not new_data.get('primary_niche'):
+                new_data['primary_niche'] = existing_data['primary_niche']
+                print(f"🛡️ Preserved existing primary niche: {existing_data['primary_niche']}")
+            elif new_data.get('primary_niche'):
+                print(f"✅ Using new primary niche: {new_data['primary_niche']}")
+            else:
+                new_data['primary_niche'] = existing_data.get('primary_niche', '')
+            
+            if existing_data.get('secondary_niche') and not new_data.get('secondary_niche'):
+                new_data['secondary_niche'] = existing_data['secondary_niche']
+                print(f"🛡️ Preserved existing secondary niche: {existing_data['secondary_niche']}")
+            elif new_data.get('secondary_niche'):
+                print(f"✅ Using new secondary niche: {new_data['secondary_niche']}")
+            else:
+                new_data['secondary_niche'] = existing_data.get('secondary_niche', '')
+            
+            # Preserve other important data
             new_data['created_at'] = existing_data.get('created_at')  # Preserve creation date
+            new_data['location'] = existing_data.get('location') or new_data.get('location', '')  # Preserve location
             new_data['updated_at'] = datetime.utcnow().isoformat()  # Update timestamp
+            
+            # Data integrity checks - reject updates that would corrupt data
+            if new_data.get('followers_count', 0) == 0 and existing_data.get('followers_count', 0) > 0:
+                print(f"⚠️ Rejecting update - followers_count would be zeroed out")
+                return {'status': 'error', 'error': 'API data incomplete - would corrupt follower count'}
+            
+            # Check for suspiciously low engagement metrics
+            if (existing_data.get('average_views', 0) > 1000 and 
+                new_data.get('average_views', 0) == 0):
+                print(f"⚠️ Rejecting update - average_views would be zeroed out")
+                return {'status': 'error', 'error': 'API data incomplete - would corrupt view metrics'}
             
             print(f"✅ Updated @{handle} successfully")
             return {'handle': handle, 'status': 'updated', 'buzz_score': new_data.get('buzz_score', 50)}

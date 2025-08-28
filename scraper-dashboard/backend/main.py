@@ -2411,6 +2411,59 @@ async def debug_job_status(current_user: str = Depends(verify_token)):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/rescraping/simple-stats")
+async def get_simple_rescrape_stats(current_user: str = Depends(verify_token)):
+    """Get simplified rescrape statistics for manual rescraping system"""
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Get total creator count
+        total_response = supabase.table("creatordata").select("id", count="exact").execute()
+        total_creators = total_response.count or 0
+        
+        # Get the most recent rescrape date
+        recent_response = supabase.table("creatordata").select("updated_at").order("updated_at", desc=True).limit(1).execute()
+        
+        last_rescrape_date = None
+        days_since_rescrape = 0
+        if recent_response.data and recent_response.data[0].get('updated_at'):
+            last_rescrape_date = recent_response.data[0]['updated_at']
+            try:
+                last_date = datetime.fromisoformat(last_rescrape_date.replace('Z', '+00:00'))
+                days_since_rescrape = (datetime.now(last_date.tzinfo) - last_date).days
+            except:
+                days_since_rescrape = 0
+        
+        # Calculate next recommended date (7 days from last rescrape)
+        if last_rescrape_date:
+            try:
+                last_date = datetime.fromisoformat(last_rescrape_date.replace('Z', '+00:00'))
+                next_recommended = last_date + timedelta(days=7)
+            except:
+                next_recommended = datetime.now() + timedelta(days=7)
+        else:
+            next_recommended = datetime.now()  # If never scraped, recommend now
+        
+        # Determine if overdue (more than 7 days since last rescrape)
+        is_overdue = days_since_rescrape > 7
+        overdue_days = max(0, days_since_rescrape - 7)
+        
+        return {
+            "total_creators": total_creators,
+            "last_rescrape_date": last_rescrape_date,
+            "days_since_rescrape": days_since_rescrape,
+            "next_recommended_date": next_recommended.isoformat(),
+            "is_overdue": is_overdue,
+            "overdue_days": overdue_days
+        }
+        
+    except Exception as e:
+        print(f"❌ Simple rescrape stats error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/system/simple-status")
 async def get_simple_system_status(current_user: str = Depends(verify_token)):
     """Get simple system status without complex monitoring"""

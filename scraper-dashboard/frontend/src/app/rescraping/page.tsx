@@ -1,1034 +1,350 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import Image from 'next/image'
-import Link from 'next/link'
-import { toast, Toaster } from 'react-hot-toast'
+import { toast } from 'react-hot-toast'
 import { 
-  ArrowPathIcon,
   CalendarIcon,
   ClockIcon,
   UserGroupIcon,
   PlayIcon,
-  Cog6ToothIcon,
-  SunIcon,
-  MoonIcon,
-  ExclamationTriangleIcon,
-  FireIcon,
-  BoltIcon,
-  WrenchScrewdriverIcon,
-  ShieldExclamationIcon,
-  ExclamationCircleIcon
+  PauseIcon,
+  CheckCircleIcon
 } from '@heroicons/react/24/outline'
 
 interface RescrapeStats {
   total_creators: number
-  creators_need_dates: number
-  creators_due_rescrape: number
-  total_overdue_creators: number
-  todays_scheduled_batch: number
-  remaining_overdue: number
-  weekly_schedule: { [key: string]: { 
-    date: string; 
-    day: string; 
-    estimated_creators: number; 
-    scheduled_time: string;
-    scheduled_time_utc: string;
-    is_today?: boolean; 
-    is_past_time?: boolean 
-  } }
-  recent_jobs: Array<{
-    id: string
-    job_type: string
-    status: string
-    total_items: number
-    created_at: string
-  }>
-  schedule_info: {
-    time_sf: string
-    time_utc: string
-    description: string
+  last_rescrape_date: string | null
+  days_since_rescrape: number
+  next_recommended_date: string
+  is_overdue: boolean
+  overdue_days: number
+}
+
+interface JobStatus {
+  id: string
+  status: string
+  progress?: {
+    current: number
+    total: number
+    percentage: number
   }
-}
-
-interface CorruptedCreator {
-  id: string
-  handle: string
-  platform: string
-  primary_niche: string | null
-  secondary_niche: string | null
+  created_at: string
   updated_at: string
-  followers_count: number
-  average_views: number
-  engagement_rate: number
-  issues: string[]
-}
-
-interface CorruptedData {
-  corrupted_creators: CorruptedCreator[]
-  total_count: number
-  missing_niches_count: number
-  zero_metrics_count: number
-}
-
-interface DueCreator {
-  id: string
-  handle: string
-  platform: string
-  updated_at: string
-  primary_niche: string
 }
 
 export default function RescrapeManagement() {
   const [stats, setStats] = useState<RescrapeStats | null>(null)
-  const [dueCreators, setDueCreators] = useState<DueCreator[]>([])
-  const [corruptedData, setCorruptedData] = useState<CorruptedData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState('')
-  const [darkMode, setDarkMode] = useState(true) // Default to dark mode
+  const [isLoading, setIsLoading] = useState(true)
+  const [isRunning, setIsRunning] = useState(false)
+  const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
+  const [countdown, setCountdown] = useState<string>('')
 
-  // Check dark mode on component mount and handle authentication
-  useEffect(() => {
-    // Check authentication first
-    const token = localStorage.getItem('token')
-    if (!token) {
-      window.location.href = '/'
+  const fetchStats = async () => {
+    try {
+      const response = await fetch('/api/rescraping/simple-stats')
+      const data = await response.json()
+      setStats(data)
+    } catch (error) {
+      console.error('Error fetching stats:', error)
+      toast.error('Failed to fetch rescrape statistics')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const updateCountdown = () => {
+    if (!stats?.next_recommended_date) return
+    
+    const now = new Date()
+    const nextDate = new Date(stats.next_recommended_date)
+    const timeDiff = nextDate.getTime() - now.getTime()
+    
+    if (timeDiff <= 0) {
+      setCountdown('Rescrape recommended now!')
       return
     }
-
-    // Set dark mode to true by default
-    setDarkMode(true)
-    document.documentElement.classList.add('dark')
-  }, [])
-
-  const handleLogout = () => {
-    localStorage.removeItem('token')
-    window.location.href = '/'
+    
+    const days = Math.floor(timeDiff / (1000 * 60 * 60 * 24))
+    const hours = Math.floor((timeDiff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
+    const minutes = Math.floor((timeDiff % (1000 * 60 * 60)) / (1000 * 60))
+    
+    if (days > 0) {
+      setCountdown(`${days}d ${hours}h ${minutes}m until next recommended rescrape`)
+    } else if (hours > 0) {
+      setCountdown(`${hours}h ${minutes}m until next recommended rescrape`)
+    } else {
+      setCountdown(`${minutes}m until next recommended rescrape`)
+    }
   }
 
-  const fetchData = async () => {
+  const checkJobStatus = async () => {
+    if (!isRunning) return
+    
     try {
-      const token = localStorage.getItem('token')
+      const response = await fetch('/api/jobs')
+      const jobs = await response.json()
+      const runningJob = jobs.find((job: JobStatus) => job.status === 'running')
       
-      // Fetch rescraping stats
-      const statsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/stats`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (statsResponse.ok) {
-        const statsData = await statsResponse.json()
-        setStats(statsData)
+      if (runningJob) {
+        setCurrentJob(runningJob)
+      } else {
+        setIsRunning(false)
+        setCurrentJob(null)
+        toast.success('Rescraping completed!')
+        fetchStats() // Refresh stats
       }
-      
-      // Fetch due creators
-      const dueResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/due-creators`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (dueResponse.ok) {
-        const dueData = await dueResponse.json()
-        setDueCreators(dueData.creators_due || [])
-      }
-
-      // Fetch corrupted creators
-      const corruptedResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/corrupted-creators`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      
-      if (corruptedResponse.ok) {
-        const corruptedData = await corruptedResponse.json()
-        setCorruptedData(corruptedData)
-      }
-      
     } catch (error) {
-      console.error('Error fetching rescraping data:', error)
-      toast.error('Failed to load rescraping data')
-    } finally {
-      setLoading(false)
+      console.error('Error checking job status:', error)
+    }
+  }
+
+  const handleRescrape = async (platform?: string) => {
+    const confirmMessage = platform 
+      ? `Start rescraping all ${platform} creators?`
+      : `Start rescraping all ${stats?.total_creators || 0} creators?`
+    
+    if (!confirm(confirmMessage)) return
+
+    setIsRunning(true)
+    setCurrentJob(null)
+    
+    try {
+      const endpoint = platform 
+        ? `/simple/rescrape-platform/${platform}`
+        : '/simple/rescrape-all'
+        
+      const response = await fetch(endpoint, { method: 'POST' })
+      const result = await response.json()
+      
+      if (result.status === 'started' || result.status === 'completed') {
+        toast.success(result.status === 'completed' ? 'Rescraping completed!' : 'Rescraping started!')
+        if (result.status === 'completed') {
+          setIsRunning(false)
+          fetchStats()
+        }
+      } else {
+        throw new Error(result.error || 'Failed to start rescraping')
+      }
+    } catch (error: any) {
+      console.error('Error starting rescrape:', error)
+      toast.error(error.message || 'Failed to start rescraping')
+      setIsRunning(false)
     }
   }
 
   useEffect(() => {
-    fetchData()
-    const interval = setInterval(fetchData, 30000) // Refresh every 30 seconds
-    return () => clearInterval(interval)
+    fetchStats()
   }, [])
 
-  const handlePopulateDates = async () => {
-    if (!confirm(`This will populate updated_at dates for ${stats?.creators_need_dates} creators. Continue?`)) return
-    
-    setActionLoading('populate')
-    try {
-      const token = localStorage.getItem('token')
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/populate-dates`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to populate dates')
-      }
-    } catch (error) {
-      console.error('Error populating dates:', error)
-      toast.error('Failed to populate dates')
-    } finally {
-      setActionLoading('')
+  useEffect(() => {
+    if (stats) {
+      updateCountdown()
+      const interval = setInterval(updateCountdown, 60000) // Update every minute
+      return () => clearInterval(interval)
     }
-  }
+  }, [stats])
 
-
-
-
-
-
-
-  const handleStartRescrape = async (platform: string) => {
-    setActionLoading(`rescrape-${platform}`)
-    try {
-      const token = localStorage.getItem('token')
-      
-      let endpoint = '/rescraping/start-auto-rescrape'
-      let body: { platform?: string; max_creators?: number } = { platform, max_creators: 100 }
-      
-      // Use daily scheduling for "daily" platform
-      if (platform === 'daily') {
-        endpoint = '/rescraping/schedule-daily'
-        body = {}
-      }
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to start rescraping')
-      }
-    } catch (error) {
-      console.error('Error starting rescrape:', error)
-      toast.error('Failed to start rescraping')
-    } finally {
-      setActionLoading('')
+  useEffect(() => {
+    if (isRunning) {
+      const interval = setInterval(checkJobStatus, 3000) // Check every 3 seconds
+      return () => clearInterval(interval)
     }
-  }
+  }, [isRunning])
 
-  const handleStartOverdueRescrape = async (platform: string) => {
-    setActionLoading(`overdue-${platform}`)
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/start-overdue-only`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          platform, 
-          max_creators: 200  // Higher limit for cleanup runs
-        })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to start overdue rescraping')
-      }
-    } catch (error) {
-      console.error('Error starting overdue rescrape:', error)
-      toast.error('Failed to start overdue rescraping')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  const handleStartTodaysBatch = async (platform: string) => {
-    setActionLoading(`todays-${platform}`)
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/start-todays-batch`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ platform })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to start today\'s batch rescraping')
-      }
-    } catch (error) {
-      console.error('Error starting today\'s batch rescrape:', error)
-      toast.error('Failed to start today\'s batch rescraping')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  const handleFixCorruptedCreators = async (platform: string) => {
-    setActionLoading(`fix-corrupted-${platform}`)
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/rescraping/fix-corrupted-creators`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ 
-          platform, 
-          max_creators: 100  // Reasonable limit for corruption fix
-        })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to start corruption fix')
-      }
-    } catch (error) {
-      console.error('Error starting corruption fix:', error)
-      toast.error('Failed to start corruption fix')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  const handleEmergencyRestart = async () => {
-    if (!confirm('This will clean up any stuck/orphaned jobs and restart the job monitor. Continue?')) return
-    
-    setActionLoading('emergency-restart')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/emergency-restart-monitor`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        console.log('Emergency cleanup details:', result)
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to restart job monitor')
-      }
-    } catch (error) {
-      console.error('Error restarting job monitor:', error)
-      toast.error('Failed to restart job monitor')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  const handleForceKillAll = async () => {
-    if (!confirm('🚨 NUCLEAR OPTION: This will forcefully kill ALL background scraping processes on the server. This should only be used when processes are completely stuck. The server may need to be restarted afterward. Continue?')) return
-    
-    setActionLoading('force-kill')
-    try {
-      const token = localStorage.getItem('token')
-      
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/jobs/force-kill-all`, {
-        method: 'POST',
-        headers: { 
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        toast.success(result.message)
-        console.log('Force kill details:', result)
-        if (result.warning) {
-          toast.error(result.warning, { duration: 10000 })
-        }
-        fetchData() // Refresh data
-      } else {
-        throw new Error('Failed to force kill processes')
-      }
-    } catch (error) {
-      console.error('Error force killing processes:', error)
-      toast.error('Failed to force kill processes')
-    } finally {
-      setActionLoading('')
-    }
-  }
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })
-  }
-
-  const getStatusBadge = (status: string) => {
-    const baseClasses = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium'
-    switch (status) {
-      case 'pending': return `${baseClasses} bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300`
-      case 'queued': return `${baseClasses} bg-blue-100 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300`
-      case 'running': return `${baseClasses} bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300`
-      case 'completed': return `${baseClasses} bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300`
-      case 'failed': return `${baseClasses} bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300`
-      case 'cancelled': return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300`
-      default: return `${baseClasses} bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300`
-    }
-  }
-
-  if (loading) {
+  if (isLoading) {
     return (
-      <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-        <div className="flex items-center justify-center h-64">
-          <ArrowPathIcon className="h-8 w-8 animate-spin text-blue-500" />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="animate-pulse">
+          <div className="h-8 bg-gray-300 rounded w-1/4 mb-4"></div>
+          <div className="h-4 bg-gray-300 rounded w-1/2 mb-8"></div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-32 bg-gray-300 rounded-lg"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!stats) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="text-center text-red-600">
+          Failed to load rescrape statistics. Please try refreshing the page.
         </div>
       </div>
     )
   }
 
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
-      <Toaster position="top-right" />
-      
-      {/* Header */}
-      <header className={`shadow-sm border-b transition-colors ${
-        darkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-      }`}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-8">
-              <div className="flex items-center space-x-3">
-                <Image
-                  src="/Buzzberry profile picture rounded corners-256x256.png" 
-                  alt="BuzzBerry Logo" 
-                  width={32} 
-                  height={32} 
-                  className="rounded-lg"
-                />
-                <h1 className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  Scraper Dashboard
-                </h1>
-              </div>
-              
-              {/* Navigation */}
-              <nav className="flex items-center space-x-6">
-                <Link
-                  href="/"
-                  className={`text-sm font-medium transition-colors ${
-                    darkMode 
-                      ? 'text-gray-300 hover:text-white' 
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  Dashboard
-                </Link>
-                <Link
-                  href="/rescraping"
-                  className={`text-sm font-medium transition-colors ${
-                    darkMode 
-                      ? 'text-white hover:text-gray-300' 
-                      : 'text-gray-900 hover:text-gray-600'
-                  }`}
-                >
-                  Rescraping
-                </Link>
-              </nav>
-            </div>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={() => {
-                  const newDarkMode = !darkMode
-                  setDarkMode(newDarkMode)
-                  if (newDarkMode) {
-                    document.documentElement.classList.add('dark')
-                  } else {
-                    document.documentElement.classList.remove('dark')
-                  }
-                }}
-                className={`p-2 rounded-lg transition-colors ${
-                  darkMode 
-                    ? 'bg-gray-700 hover:bg-gray-600 text-yellow-400' 
-                    : 'bg-gray-200 hover:bg-gray-300 text-gray-700'
-                }`}
-                title="Toggle dark mode"
-              >
-                {darkMode ? (
-                  <SunIcon className="h-5 w-5" />
-                ) : (
-                  <MoonIcon className="h-5 w-5" />
-                )}
-              </button>
-              <button
-                onClick={handleLogout}
-                className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                  darkMode 
-                    ? 'text-gray-300 hover:text-white' 
-                    : 'text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                Logout
-              </button>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-gray-900 mb-2">Manual Rescraping</h1>
+        <p className="text-lg text-gray-600">
+          Manually rescrape creators when needed. Recommended interval: every 7 days.
+        </p>
+      </div>
+
+      {/* Status Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center">
+            <UserGroupIcon className="h-8 w-8 text-blue-500 mr-3" />
+            <div>
+              <p className="text-sm font-medium text-gray-500">Total Creators</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.total_creators}</p>
             </div>
           </div>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-            Rescraping Management
-          </h1>
-          <p className={`mt-2 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-            Automatic rescraping at 8:00 AM San Francisco time includes ALL overdue creators. Monitor progress and handle selective cleanup.
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center">
+            <CalendarIcon className="h-8 w-8 text-green-500 mr-3" />
+            <div>
+              <p className="text-sm font-medium text-gray-500">Last Rescrape</p>
+              <p className="text-lg font-semibold text-gray-900">
+                {stats.last_rescrape_date 
+                  ? new Date(stats.last_rescrape_date).toLocaleDateString()
+                  : 'Never'
+                }
+              </p>
+              <p className="text-sm text-gray-500">
+                {stats.days_since_rescrape > 0 
+                  ? `${stats.days_since_rescrape} days ago`
+                  : 'Today'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center">
+            <ClockIcon className={`h-8 w-8 mr-3 ${stats.is_overdue ? 'text-red-500' : 'text-yellow-500'}`} />
+            <div>
+              <p className="text-sm font-medium text-gray-500">Status</p>
+              <p className={`text-lg font-semibold ${stats.is_overdue ? 'text-red-600' : 'text-green-600'}`}>
+                {stats.is_overdue 
+                  ? `Overdue (${stats.overdue_days} days)`
+                  : 'Up to date'
+                }
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <div className="flex items-center">
+            <CheckCircleIcon className="h-8 w-8 text-purple-500 mr-3" />
+            <div>
+              <p className="text-sm font-medium text-gray-500">Next Recommended</p>
+              <p className="text-sm font-semibold text-gray-900">
+                {new Date(stats.next_recommended_date).toLocaleDateString()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Countdown Timer */}
+      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 mb-8">
+        <div className="flex items-center justify-center">
+          <ClockIcon className="h-6 w-6 text-indigo-600 mr-3" />
+          <p className={`text-lg font-medium ${stats.is_overdue ? 'text-red-600' : 'text-indigo-600'}`}>
+            {countdown || 'Calculating...'}
           </p>
         </div>
+      </div>
 
-        {/* Enhanced Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
+      {/* Progress Display */}
+      {isRunning && currentJob && (
+        <div className="bg-blue-50 rounded-lg p-6 mb-8">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center">
-              <UserGroupIcon className="h-8 w-8 text-blue-500" />
-              <div className="ml-4">
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Total Creators
-                </p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.total_creators?.toLocaleString() || 0}
-                </p>
-              </div>
+              <PauseIcon className="h-6 w-6 text-blue-600 mr-3 animate-spin" />
+              <h3 className="text-lg font-semibold text-blue-900">Rescraping in Progress</h3>
+            </div>
+            <div className="text-sm text-blue-700">
+              Job ID: {currentJob.id}
             </div>
           </div>
-
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <div className="flex items-center">
-              <CalendarIcon className="h-8 w-8 text-green-500" />
-              <div className="ml-4">
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Due Today
-                </p>
-                <p className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.todays_scheduled_batch?.toLocaleString() || 0}
-                </p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  7 days old
-                </p>
+          
+          {currentJob.progress && (
+            <>
+              <div className="bg-blue-200 rounded-full h-3 mb-2">
+                <div 
+                  className="bg-blue-600 rounded-full h-3 transition-all duration-300"
+                  style={{ width: `${currentJob.progress.percentage}%` }}
+                ></div>
               </div>
-            </div>
-          </div>
+              <p className="text-sm text-blue-700">
+                {currentJob.progress.current} of {currentJob.progress.total} creators processed 
+                ({currentJob.progress.percentage}%)
+              </p>
+            </>
+          )}
+          
+          <p className="text-sm text-blue-600 mt-2">
+            Started: {new Date(currentJob.created_at).toLocaleString()}
+          </p>
+        </div>
+      )}
 
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <div className="flex items-center">
-              <ExclamationTriangleIcon className={`h-8 w-8 ${(stats?.remaining_overdue || 0) > 0 ? 'text-orange-500' : 'text-gray-400'}`} />
-              <div className="ml-4">
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Overdue
-                </p>
-                <p className={`text-2xl font-bold ${(stats?.remaining_overdue || 0) > 0 ? 'text-orange-500' : (darkMode ? 'text-white' : 'text-gray-900')}`}>
-                  {stats?.remaining_overdue?.toLocaleString() || 0}
-                </p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  8+ days old
-                </p>
-              </div>
-            </div>
-          </div>
+      {/* Action Buttons */}
+      <div className="bg-white rounded-lg shadow p-6">
+        <h3 className="text-xl font-semibold text-gray-900 mb-6">Start Manual Rescrape</h3>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button
+            onClick={() => handleRescrape()}
+            disabled={isRunning}
+            className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-all ${
+              isRunning 
+                ? 'bg-gray-300 cursor-not-allowed text-gray-500'
+                : stats.is_overdue
+                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+          >
+            <PlayIcon className="h-5 w-5 mr-2" />
+            Rescrape All Creators
+            <span className="ml-2 text-sm">({stats.total_creators})</span>
+          </button>
 
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <div className="flex items-center">
-              <ClockIcon className="h-8 w-8 text-blue-500" />
-              <div className="ml-4">
-                <p className={`text-sm font-medium ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Schedule Time
-                </p>
-                <p className={`text-lg font-bold ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  {stats?.schedule_info?.time_sf || '8:00 AM PST/PDT'}
-                </p>
-                <p className={`text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                  {stats?.schedule_info?.time_utc || '15:00 UTC'}
-                </p>
-              </div>
-            </div>
-          </div>
+          <button
+            onClick={() => handleRescrape('instagram')}
+            disabled={isRunning}
+            className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-all ${
+              isRunning 
+                ? 'bg-gray-300 cursor-not-allowed text-gray-500'
+                : 'bg-pink-600 hover:bg-pink-700 text-white'
+            }`}
+          >
+            <PlayIcon className="h-5 w-5 mr-2" />
+            Instagram Only
+          </button>
+
+          <button
+            onClick={() => handleRescrape('tiktok')}
+            disabled={isRunning}
+            className={`flex items-center justify-center px-6 py-3 rounded-lg font-medium transition-all ${
+              isRunning 
+                ? 'bg-gray-300 cursor-not-allowed text-gray-500'
+                : 'bg-black hover:bg-gray-800 text-white'
+            }`}
+          >
+            <PlayIcon className="h-5 w-5 mr-2" />
+            TikTok Only
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Weekly Schedule */}
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              Weekly Rescraping Schedule
-            </h2>
-            <div className="space-y-3">
-              {stats?.weekly_schedule && Object.values(stats?.weekly_schedule || {}).map((day) => (
-                <div key={day.day} className={`flex items-center justify-between p-3 rounded-lg ${
-                  day.is_today 
-                    ? (darkMode ? 'bg-blue-900/20 border border-blue-700' : 'bg-blue-50 border border-blue-200')
-                    : (darkMode ? 'bg-gray-700/50' : 'bg-gray-50')
-                }`}>
-                  <div>
-                    <div className="flex items-center">
-                      <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                        {day.day}
-                      </span>
-                      {day.is_today && (
-                        <span className="ml-2 text-xs px-2 py-1 rounded-full bg-blue-600 text-white">
-                          TODAY
-                        </span>
-                      )}
-                    </div>
-                    <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                      {day.date} • {day.scheduled_time} ({day.scheduled_time_utc})
-                      <br />
-                      {day.estimated_creators > 0 ? `${day.estimated_creators} creators due` : 'No creators due'}
-                      {day.is_today && day.is_past_time && (
-                        <span className="ml-2 text-xs px-2 py-1 rounded-full bg-orange-600 text-white">
-                          OVERDUE
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center">
-                    {day.estimated_creators > 0 && (
-                      <>
-                        <div className={`w-24 bg-gray-200 dark:bg-gray-600 rounded-full h-2 mr-3`}>
-                          <div 
-                            className={`h-2 rounded-full ${
-                              day.is_today ? 'bg-blue-500' :
-                              day.estimated_creators > 100 ? 'bg-red-500' :
-                              day.estimated_creators > 50 ? 'bg-orange-500' : 'bg-green-500'
-                            }`}
-                            style={{ width: `${Math.min((day.estimated_creators / 200) * 100, 100)}%` }}
-                          ></div>
-                        </div>
-                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                          day.is_today
-                            ? 'bg-blue-600 text-white'
-                            : day.estimated_creators > 100
-                            ? (darkMode ? 'bg-red-900/50 text-red-300' : 'bg-red-100 text-red-800')
-                            : day.estimated_creators > 50
-                            ? (darkMode ? 'bg-orange-900/50 text-orange-300' : 'bg-orange-100 text-orange-800')
-                            : (darkMode ? 'bg-green-900/50 text-green-300' : 'bg-green-100 text-green-800')
-                        }`}>
-                          {day.estimated_creators}
-                        </span>
-                      </>
-                    )}
-                    {day.estimated_creators === 0 && (
-                      <span className={`text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
-                        No jobs scheduled
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Action Panel */}
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              Actions
-            </h2>
-            <div className="space-y-4">
-              {/* Emergency Restart Button */}
-              <div className={`p-4 border rounded-lg ${darkMode ? 'border-yellow-600 bg-yellow-900/10' : 'border-yellow-300 bg-yellow-50'}`}>
-                <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-yellow-300' : 'text-yellow-800'}`}>
-                  <ExclamationCircleIcon className="h-5 w-5 mr-2" />
-                  Emergency: Stuck Jobs?
-                </h3>
-                <p className={`text-sm mb-3 ${darkMode ? 'text-yellow-200' : 'text-yellow-700'}`}>
-                  If jobs are stuck or server crashed, try <strong>Emergency Restart</strong> first. If processes are still running, use <strong className="text-red-600">Force Kill</strong> as a last resort.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <button
-                    onClick={handleEmergencyRestart}
-                    disabled={actionLoading === 'emergency-restart'}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-yellow-600 hover:bg-yellow-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'emergency-restart' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <ExclamationCircleIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Emergency Restart Job Monitor
-                  </button>
-                  
-                  <button
-                    onClick={handleForceKillAll}
-                    disabled={actionLoading === 'force-kill'}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'force-kill' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <FireIcon className="h-4 w-4 mr-2" />
-                    )}
-                    🚨 FORCE KILL ALL PROCESSES
-                  </button>
-                </div>
-              </div>
-              {/* Populate Dates */}
-              {(stats?.creators_need_dates || 0) > 0 && (
-                <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>
-                  <h3 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                    Populate Missing Dates
-                  </h3>
-                  <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    {stats?.creators_need_dates || 0} creators need updated_at dates. This will spread them across the past week.
-                  </p>
-                  <button
-                    onClick={handlePopulateDates}
-                    disabled={actionLoading === 'populate'}
-                    className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'populate' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Cog6ToothIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Populate Dates
-                  </button>
-                </div>
-              )}
-
-              {/* Start Rescraping */}
-              <div className={`p-4 border rounded-lg ${darkMode ? 'border-gray-700 bg-gray-900/50' : 'border-gray-200 bg-gray-50'}`}>
-                <h3 className={`font-medium mb-2 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                  Start Rescraping
-                </h3>
-                <p className={`text-sm mb-3 ${darkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                  Start automatic rescraping for creators that haven&apos;t been updated in 7+ days.
-                </p>
-                <div className="space-y-2">
-                  <button
-                    onClick={() => handleStartRescrape('daily')}
-                    disabled={actionLoading.startsWith('rescrape')}
-                    className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    {actionLoading === 'rescrape-daily' ? (
-                      <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <CalendarIcon className="h-4 w-4 mr-2" />
-                    )}
-                    Daily Rescrape (Recommended)
-                  </button>
-                  <div className="flex space-x-2">
-                    <button
-                      onClick={() => handleStartRescrape('instagram')}
-                      disabled={actionLoading.startsWith('rescrape')}
-                      className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
-                    >
-                      {actionLoading === 'rescrape-instagram' ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <PlayIcon className="h-4 w-4 mr-2" />
-                      )}
-                      Instagram Only
-                    </button>
-                    <button
-                      onClick={() => handleStartRescrape('tiktok')}
-                      disabled={actionLoading.startsWith('rescrape')}
-                      className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-                    >
-                      {actionLoading === 'rescrape-tiktok' ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <PlayIcon className="h-4 w-4 mr-2" />
-                      )}
-                      TikTok Only
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Today's Missed Batch Section - Show when past scheduled time and creators still due */}
-              {(stats?.todays_scheduled_batch || 0) > 0 && 
-               stats?.weekly_schedule && 
-               Object.values(stats.weekly_schedule).some(day => day.is_today && day.is_past_time) && (
-                <div className={`p-4 border rounded-lg ${darkMode ? 'border-blue-600 bg-blue-900/10' : 'border-blue-300 bg-blue-50'}`}>
-                  <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-blue-300' : 'text-blue-800'}`}>
-                    <BoltIcon className="h-5 w-5 mr-2" />
-                    Rescrape Today&apos;s Missed Batch
-                  </h3>
-                  <p className={`text-sm mb-3 ${darkMode ? 'text-blue-200' : 'text-blue-700'}`}>
-                    {stats?.todays_scheduled_batch || 0} creators were scheduled for today&apos;s 8:00 AM rescrape but weren&apos;t processed. 
-                    Run them manually now.
-                  </p>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleStartTodaysBatch('all')}
-                      disabled={actionLoading.startsWith('todays')}
-                      className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                      {actionLoading === 'todays-all' ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <BoltIcon className="h-4 w-4 mr-2" />
-                      )}
-                      Rescrape Today&apos;s Batch ({stats?.todays_scheduled_batch || 0})
-                    </button>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handleStartTodaysBatch('instagram')}
-                        disabled={actionLoading.startsWith('todays')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'todays-instagram' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <PlayIcon className="h-4 w-4 mr-2" />
-                        )}
-                        Instagram Only
-                      </button>
-                      <button
-                        onClick={() => handleStartTodaysBatch('tiktok')}
-                        disabled={actionLoading.startsWith('todays')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'todays-tiktok' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <PlayIcon className="h-4 w-4 mr-2" />
-                        )}
-                        TikTok Only
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Overdue Creators Section */}
-              {(stats?.remaining_overdue || 0) > 0 && (
-                <div className={`p-4 border rounded-lg ${darkMode ? 'border-orange-600 bg-orange-900/10' : 'border-orange-300 bg-orange-50'}`}>
-                  <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-orange-300' : 'text-orange-800'}`}>
-                    <FireIcon className="h-5 w-5 mr-2" />
-                    Cleanup Overdue Creators
-                  </h3>
-                  <p className={`text-sm mb-3 ${darkMode ? 'text-orange-200' : 'text-orange-700'}`}>
-                    {stats?.remaining_overdue || 0} creators are truly overdue (8+ days old) and need immediate attention. 
-                    These missed their scheduled rescrape window and should be processed separately.
-                  </p>
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleStartOverdueRescrape('all')}
-                      disabled={actionLoading.startsWith('overdue')}
-                      className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-orange-600 hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-orange-500 disabled:opacity-50"
-                    >
-                      {actionLoading === 'overdue-all' ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <FireIcon className="h-4 w-4 mr-2" />
-                      )}
-                      Rescrape Overdue Only ({stats?.remaining_overdue || 0})
-                    </button>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handleStartOverdueRescrape('instagram')}
-                        disabled={actionLoading.startsWith('overdue')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'overdue-instagram' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <PlayIcon className="h-4 w-4 mr-2" />
-                        )}
-                        Instagram Only
-                      </button>
-                      <button
-                        onClick={() => handleStartOverdueRescrape('tiktok')}
-                        disabled={actionLoading.startsWith('overdue')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'overdue-tiktok' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <PlayIcon className="h-4 w-4 mr-2" />
-                        )}
-                        TikTok Only
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Corrupted Data Fix Section */}
-              {(corruptedData?.total_count || 0) > 0 && (
-                <div className={`p-4 border rounded-lg ${darkMode ? 'border-red-600 bg-red-900/10' : 'border-red-300 bg-red-50'}`}>
-                  <h3 className={`font-medium mb-2 flex items-center ${darkMode ? 'text-red-300' : 'text-red-800'}`}>
-                    <WrenchScrewdriverIcon className="h-5 w-5 mr-2" />
-                    Fix Corrupted Creator Data
-                  </h3>
-                  <p className={`text-sm mb-3 ${darkMode ? 'text-red-200' : 'text-red-700'}`}>
-                    {corruptedData?.total_count || 0} creators have corrupted data from the rescraper bug: 
-                    {corruptedData?.missing_niches_count || 0} missing niches, {corruptedData?.zero_metrics_count || 0} zero metrics.
-                  </p>
-                  
-                  {/* Show sample of corrupted creators */}
-                  {corruptedData && corruptedData.corrupted_creators.length > 0 && (
-                    <div className={`mb-3 p-2 rounded ${darkMode ? 'bg-red-900/20' : 'bg-red-100'}`}>
-                      <p className={`text-xs font-medium mb-1 ${darkMode ? 'text-red-300' : 'text-red-800'}`}>
-                        Examples ({Math.min(3, corruptedData.corrupted_creators.length)} of {corruptedData.total_count}):
-                      </p>
-                      <div className="space-y-1">
-                        {corruptedData.corrupted_creators.slice(0, 3).map(creator => (
-                          <div key={creator.handle} className={`text-xs ${darkMode ? 'text-red-200' : 'text-red-700'}`}>
-                            <span className="font-medium">@{creator.handle}</span> ({creator.platform}): 
-                            {creator.issues.includes('missing_primary_niche') && ' Missing primary niche'}
-                            {creator.issues.includes('missing_secondary_niche') && ' Missing secondary niche'}
-                            {creator.issues.includes('zero_average_views') && ' Zero views'}
-                            {creator.issues.includes('zero_engagement_rate') && ' Zero engagement rate'}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="space-y-2">
-                    <button
-                      onClick={() => handleFixCorruptedCreators('all')}
-                      disabled={actionLoading.startsWith('fix-corrupted')}
-                      className="w-full inline-flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50"
-                    >
-                      {actionLoading === 'fix-corrupted-all' ? (
-                        <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <WrenchScrewdriverIcon className="h-4 w-4 mr-2" />
-                      )}
-                      Fix All Corrupted Data ({corruptedData?.total_count || 0})
-                    </button>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => handleFixCorruptedCreators('instagram')}
-                        disabled={actionLoading.startsWith('fix-corrupted')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-pink-600 hover:bg-pink-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-pink-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'fix-corrupted-instagram' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <ShieldExclamationIcon className="h-4 w-4 mr-2" />
-                        )}
-                        Instagram Only
-                      </button>
-                      <button
-                        onClick={() => handleFixCorruptedCreators('tiktok')}
-                        disabled={actionLoading.startsWith('fix-corrupted')}
-                        className="flex-1 inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-white bg-black hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
-                      >
-                        {actionLoading === 'fix-corrupted-tiktok' ? (
-                          <ArrowPathIcon className="h-4 w-4 animate-spin mr-2" />
-                        ) : (
-                          <ShieldExclamationIcon className="h-4 w-4 mr-2" />
-                        )}
-                        TikTok Only
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          </div>
+        <div className="mt-4 text-sm text-gray-500">
+          <p>• Rescraping updates creator metrics, engagement rates, and follower counts</p>
+          <p>• Existing niche data and creator information will be preserved</p>
+          <p>• Process typically takes 5-10 minutes per 100 creators</p>
         </div>
-
-        {/* Recent Jobs & Due Creators */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
-          {/* Recent Jobs */}
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              Recent Rescraping Jobs
-            </h2>
-            <div className="space-y-3">
-              {stats?.recent_jobs && stats.recent_jobs.length > 0 ? (
-                stats?.recent_jobs?.map((job) => (
-                  <div key={job.id} className={`p-3 border rounded-lg ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                          {job.job_type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                        </span>
-                        <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          {job.total_items} creators • {formatDate(job.created_at)}
-                        </div>
-                      </div>
-                      <span className={getStatusBadge(job.status)}>
-                        {job.status}
-                      </span>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  No recent rescraping jobs
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Due Creators Sample */}
-          <div className={`rounded-lg shadow p-6 ${darkMode ? 'bg-gray-800' : 'bg-white'}`}>
-            <h2 className={`text-lg font-medium mb-4 ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-              Creators Due for Rescraping (Sample)
-            </h2>
-            <div className="space-y-3 max-h-64 overflow-y-auto">
-              {dueCreators.length > 0 ? (
-                dueCreators.slice(0, 10).map((creator) => (
-                  <div key={creator.id} className={`p-3 border rounded-lg ${darkMode ? 'border-gray-700' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className={`font-medium ${darkMode ? 'text-white' : 'text-gray-900'}`}>
-                          @{creator.handle}
-                        </span>
-                        <div className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                          {creator.platform} • {creator.primary_niche}
-                        </div>
-                      </div>
-                      <div className={`text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                        {formatDate(creator.updated_at)}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
-                  No creators currently due for rescraping
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
+      </div>
     </div>
   )
 }
-// Force deployment Mon Aug 25 20:05:52 PDT 2025

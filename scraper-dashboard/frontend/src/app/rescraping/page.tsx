@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { toast } from 'react-hot-toast'
 import { 
   CalendarIcon,
@@ -39,7 +39,7 @@ export default function RescrapeManagement() {
   const [currentJob, setCurrentJob] = useState<JobStatus | null>(null)
   const [countdown, setCountdown] = useState<string>('')
 
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     try {
       const response = await fetch('/api/rescraping/simple-stats')
       const data = await response.json()
@@ -50,9 +50,9 @@ export default function RescrapeManagement() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [])
 
-  const updateCountdown = () => {
+  const updateCountdown = useCallback(() => {
     if (!stats?.next_recommended_date) return
     
     const now = new Date()
@@ -75,9 +75,9 @@ export default function RescrapeManagement() {
     } else {
       setCountdown(`${minutes}m until next recommended rescrape`)
     }
-  }
+  }, [stats?.next_recommended_date])
 
-  const checkJobStatus = async () => {
+  const checkJobStatus = useCallback(async () => {
     if (!isRunning) return
     
     try {
@@ -96,7 +96,7 @@ export default function RescrapeManagement() {
     } catch (error) {
       console.error('Error checking job status:', error)
     }
-  }
+  }, [isRunning, fetchStats])
 
   const handleRescrape = async (platform?: string) => {
     const confirmMessage = platform 
@@ -125,16 +125,16 @@ export default function RescrapeManagement() {
       } else {
         throw new Error(result.error || 'Failed to start rescraping')
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error starting rescrape:', error)
-      toast.error(error.message || 'Failed to start rescraping')
+      toast.error(error instanceof Error ? error.message : 'Failed to start rescraping')
       setIsRunning(false)
     }
   }
 
   useEffect(() => {
     fetchStats()
-  }, [])
+  }, [fetchStats])
 
   useEffect(() => {
     if (stats) {
@@ -142,14 +142,14 @@ export default function RescrapeManagement() {
       const interval = setInterval(updateCountdown, 60000) // Update every minute
       return () => clearInterval(interval)
     }
-  }, [stats])
+  }, [stats, updateCountdown])
 
   useEffect(() => {
     if (isRunning) {
       const interval = setInterval(checkJobStatus, 3000) // Check every 3 seconds
       return () => clearInterval(interval)
     }
-  }, [isRunning])
+  }, [isRunning, checkJobStatus])
 
   if (isLoading) {
     return (

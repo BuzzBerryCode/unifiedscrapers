@@ -20,6 +20,8 @@ import traceback
 import threading
 import time
 import signal
+# Import simple scraper
+from simple_scraper import get_scraper
 
 # ==================== CONFIGURATION ====================
 
@@ -87,6 +89,199 @@ class JobStatus:
     CANCELLED = "cancelled"
     QUEUED = "queued"
     PAUSED = "paused"
+
+# ==================== SIMPLE EXECUTION FUNCTIONS ====================
+
+def simple_rescrape_creators(creator_handles: List[str]) -> Dict:
+    """Simple function to rescrape a list of creators directly"""
+    scraper = get_scraper()
+    results = []
+    successful = 0
+    failed = 0
+    
+    print(f"🚀 Starting simple rescrape of {len(creator_handles)} creators")
+    
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return {'status': 'error', 'error': 'Database not available'}
+        
+        for i, handle in enumerate(creator_handles, 1):
+            print(f"\n[{i}/{len(creator_handles)}] Processing @{handle}")
+            
+            try:
+                # Get existing creator data
+                response = supabase.table("creatordata").select("*").eq("handle", handle).execute()
+                if not response.data:
+                    print(f"❌ Creator @{handle} not found in database")
+                    failed += 1
+                    continue
+                
+                existing_data = response.data[0]
+                platform = existing_data.get('platform', '').lower()
+                
+                # Scrape new data
+                if platform == 'instagram':
+                    new_data = scraper.scrape_instagram_creator(handle)
+                elif platform == 'tiktok':
+                    new_data = scraper.scrape_tiktok_creator(handle)
+                else:
+                    print(f"❌ Unknown platform for @{handle}: {platform}")
+                    failed += 1
+                    continue
+                
+                if not new_data:
+                    print(f"❌ Failed to scrape @{handle}")
+                    failed += 1
+                    continue
+                
+                if new_data.get('error') == 'temporary':
+                    print(f"⚠️ Temporary error for @{handle} - skipping")
+                    continue
+                
+                # Update creator
+                update_result = scraper.update_existing_creator(handle, new_data, existing_data)
+                if update_result['status'] == 'updated':
+                    # Save to database
+                    supabase.table("creatordata").update(new_data).eq("handle", handle).execute()
+                    successful += 1
+                    print(f"✅ Updated @{handle}")
+                else:
+                    print(f"❌ Failed to update @{handle}: {update_result.get('error', 'Unknown error')}")
+                    failed += 1
+                
+                results.append({
+                    'handle': handle,
+                    'status': update_result['status'],
+                    'error': update_result.get('error')
+                })
+                
+                # Small delay to prevent API rate limiting
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"❌ Error processing @{handle}: {e}")
+                failed += 1
+                results.append({
+                    'handle': handle,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        summary = f"Completed: {successful} successful, {failed} failed"
+        print(f"🏁 {summary}")
+        
+        return {
+            'status': 'completed',
+            'successful': successful,
+            'failed': failed,
+            'summary': summary,
+            'results': results
+        }
+        
+    except Exception as e:
+        print(f"❌ Rescrape function failed: {e}")
+        traceback.print_exc()
+        return {'status': 'error', 'error': str(e)}
+
+def simple_process_new_creators(csv_data: List[Dict]) -> Dict:
+    """Simple function to process new creators from CSV data"""
+    scraper = get_scraper()
+    results = []
+    successful = 0
+    failed = 0
+    skipped = 0
+    
+    print(f"🚀 Processing {len(csv_data)} new creators")
+    
+    try:
+        supabase = get_supabase_client()
+        if not supabase:
+            return {'status': 'error', 'error': 'Database not available'}
+        
+        for i, creator_info in enumerate(csv_data, 1):
+            handle = creator_info.get('handle', '').strip().lstrip('@')
+            platform = creator_info.get('platform', '').lower()
+            
+            if not handle or not platform:
+                print(f"❌ Missing handle or platform in row {i}")
+                failed += 1
+                continue
+            
+            print(f"\n[{i}/{len(csv_data)}] Processing new creator @{handle} ({platform})")
+            
+            try:
+                # Check if creator already exists
+                existing = supabase.table("creatordata").select("id").eq("handle", handle).execute()
+                if existing.data:
+                    print(f"⚠️ Creator @{handle} already exists - skipping")
+                    skipped += 1
+                    continue
+                
+                # Scrape creator data
+                if platform == 'instagram':
+                    creator_data = scraper.scrape_instagram_creator(handle)
+                elif platform == 'tiktok':
+                    creator_data = scraper.scrape_tiktok_creator(handle)
+                else:
+                    print(f"❌ Unsupported platform: {platform}")
+                    failed += 1
+                    continue
+                
+                if not creator_data:
+                    print(f"❌ Failed to scrape @{handle}")
+                    failed += 1
+                    continue
+                
+                if creator_data.get('error') == 'temporary':
+                    print(f"⚠️ Temporary error for @{handle} - skipping")
+                    continue
+                
+                # Create new creator record
+                create_result = scraper.create_new_creator(creator_data, creator_info)
+                if create_result['status'] == 'created':
+                    # Save to database
+                    supabase.table("creatordata").insert(create_result['data']).execute()
+                    successful += 1
+                    print(f"✅ Created @{handle}")
+                else:
+                    print(f"❌ Failed to create @{handle}: {create_result.get('error', 'Unknown error')}")
+                    failed += 1
+                
+                results.append({
+                    'handle': handle,
+                    'status': create_result['status'],
+                    'error': create_result.get('error')
+                })
+                
+                # Small delay to prevent API rate limiting
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"❌ Error processing @{handle}: {e}")
+                failed += 1
+                results.append({
+                    'handle': handle,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        summary = f"Completed: {successful} created, {skipped} skipped, {failed} failed"
+        print(f"🏁 {summary}")
+        
+        return {
+            'status': 'completed',
+            'successful': successful,
+            'skipped': skipped,
+            'failed': failed,
+            'summary': summary,
+            'results': results
+        }
+        
+    except Exception as e:
+        print(f"❌ New creators function failed: {e}")
+        traceback.print_exc()
+        return {'status': 'error', 'error': str(e)}
 
 # ==================== AUTHENTICATION ====================
 
@@ -1807,25 +2002,31 @@ async def startup_event():
         except Exception as cleanup_error:
             print(f"⚠️ Startup cleanup failed: {cleanup_error}")
         
-        # Start background job monitor
+        # Initialize simple components
         try:
-            monitor_thread = threading.Thread(target=job_monitor)
-            monitor_thread.daemon = True
-            monitor_thread.start()
-            print("✅ Background job monitor started")
-        except Exception as monitor_error:
-            print(f"⚠️ Background job monitor failed to start: {monitor_error}")
-            # Don't fail startup if monitor fails
-        
-        # Start daily scheduler
-        try:
-            scheduler_thread = threading.Thread(target=run_daily_scheduler)
-            scheduler_thread.daemon = True
-            scheduler_thread.start()
-            print("✅ Daily scheduler started")
-        except Exception as scheduler_error:
-            print(f"⚠️ Daily scheduler failed to start: {scheduler_error}")
-            # Don't fail startup if scheduler fails
+            print("🔧 Initializing simple scraper system...")
+            
+            # Test scraper initialization
+            scraper = get_scraper()
+            if scraper:
+                print("✅ Simple scraper initialized")
+            else:
+                print("❌ Simple scraper initialization failed")
+            
+            # Start daily scheduler (simplified)
+            try:
+                scheduler_thread = threading.Thread(target=run_daily_scheduler, daemon=True)
+                scheduler_thread.start()
+                print("✅ Daily scheduler started")
+            except Exception as scheduler_error:
+                print(f"⚠️ Daily scheduler failed to start: {scheduler_error}")
+            
+            print("🚀 Simple system initialization complete!")
+            
+        except Exception as system_error:
+            print(f"❌ Simple system initialization failed: {system_error}")
+            traceback.print_exc()
+            # Don't fail startup if system initialization fails
         
         print("✅ Scraper Dashboard API started")
         
@@ -2207,6 +2408,206 @@ async def debug_job_status(current_user: str = Depends(verify_token)):
         
     except Exception as e:
         print(f"❌ Debug status error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/system/simple-status")
+async def get_simple_system_status(current_user: str = Depends(verify_token)):
+    """Get simple system status without complex monitoring"""
+    try:
+        # Basic system info
+        supabase_ok = get_supabase_client() is not None
+        redis_ok = get_redis_client() is not None
+        scraper_ok = get_scraper() is not None
+        
+        # Count creators in database
+        creator_count = 0
+        if supabase_ok:
+            try:
+                supabase = get_supabase_client()
+                response = supabase.table("creatordata").select("id", count="exact").execute()
+                creator_count = response.count
+            except:
+                pass
+        
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "connections": {
+                "supabase": supabase_ok,
+                "redis": redis_ok,
+                "scraper": scraper_ok
+            },
+            "data": {
+                "total_creators": creator_count
+            },
+            "status": "healthy" if all([supabase_ok, redis_ok, scraper_ok]) else "degraded"
+        }
+        
+    except Exception as e:
+        print(f"❌ System status error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== SIMPLE DIRECT EXECUTION ENDPOINTS ====================
+
+@app.post("/simple/rescrape-all")
+async def simple_rescrape_all_creators(current_user: str = Depends(verify_token)):
+    """Simple endpoint to rescrape all creators directly (no job queue)"""
+    try:
+        print("🚀 Starting simple rescrape all creators")
+        
+        # Get all creators from database
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        response = supabase.table("creatordata").select("handle").execute()
+        if not response.data:
+            return {"message": "No creators found to rescrape", "successful": 0, "failed": 0}
+        
+        creator_handles = [creator["handle"] for creator in response.data]
+        
+        # Execute directly
+        result = simple_rescrape_creators(creator_handles)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Simple rescrape all error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simple/rescrape-platform/{platform}")
+async def simple_rescrape_platform(platform: str, current_user: str = Depends(verify_token)):
+    """Simple endpoint to rescrape creators from specific platform"""
+    try:
+        platform = platform.lower()
+        if platform not in ['instagram', 'tiktok']:
+            raise HTTPException(status_code=400, detail="Platform must be 'instagram' or 'tiktok'")
+        
+        print(f"🚀 Starting simple rescrape for {platform}")
+        
+        # Get platform creators from database
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        response = supabase.table("creatordata").select("handle").eq("platform", platform.title()).execute()
+        if not response.data:
+            return {"message": f"No {platform} creators found to rescrape", "successful": 0, "failed": 0}
+        
+        creator_handles = [creator["handle"] for creator in response.data]
+        
+        # Execute directly
+        result = simple_rescrape_creators(creator_handles)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Simple rescrape platform error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simple/rescrape-overdue")
+async def simple_rescrape_overdue_creators(days_old: int = 7, current_user: str = Depends(verify_token)):
+    """Simple endpoint to rescrape creators older than specified days"""
+    try:
+        print(f"🚀 Starting simple rescrape for creators older than {days_old} days")
+        
+        # Get overdue creators from database
+        supabase = get_supabase_client()
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        cutoff_date = (datetime.utcnow() - timedelta(days=days_old)).isoformat()
+        response = supabase.table("creatordata").select("handle").lt("updated_at", cutoff_date).execute()
+        
+        if not response.data:
+            return {"message": f"No creators older than {days_old} days found", "successful": 0, "failed": 0}
+        
+        creator_handles = [creator["handle"] for creator in response.data]
+        
+        # Execute directly
+        result = simple_rescrape_creators(creator_handles)
+        result["message"] = f"Rescraped {len(creator_handles)} creators older than {days_old} days"
+        return result
+        
+    except Exception as e:
+        print(f"❌ Simple rescrape overdue error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simple/process-csv")
+async def simple_process_csv_creators(file: UploadFile = File(...), current_user: str = Depends(verify_token)):
+    """Simple endpoint to process new creators from CSV directly (no job queue)"""
+    try:
+        print("🚀 Starting simple CSV processing")
+        
+        # Validate file
+        if not file.filename.endswith('.csv'):
+            raise HTTPException(status_code=400, detail="File must be a CSV")
+        
+        # Read CSV
+        contents = await file.read()
+        df = pd.read_csv(io.StringIO(contents.decode('utf-8')))
+        
+        # Validate required columns
+        required_columns = ['handle', 'platform']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise HTTPException(status_code=400, detail=f"Missing required columns: {missing_columns}")
+        
+        # Convert to list of dicts
+        csv_data = df.to_dict('records')
+        
+        # Execute directly
+        result = simple_process_new_creators(csv_data)
+        return result
+        
+    except Exception as e:
+        print(f"❌ Simple CSV processing error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/simple/test-single-creator")
+async def simple_test_single_creator(handle: str, platform: str, current_user: str = Depends(verify_token)):
+    """Simple endpoint to test scraping a single creator"""
+    try:
+        handle = handle.strip().lstrip('@')
+        platform = platform.lower()
+        
+        if platform not in ['instagram', 'tiktok']:
+            raise HTTPException(status_code=400, detail="Platform must be 'instagram' or 'tiktok'")
+        
+        print(f"🧪 Testing single creator: @{handle} ({platform})")
+        
+        scraper = get_scraper()
+        
+        # Scrape creator data
+        if platform == 'instagram':
+            creator_data = scraper.scrape_instagram_creator(handle)
+        else:
+            creator_data = scraper.scrape_tiktok_creator(handle)
+        
+        if not creator_data:
+            return {"status": "failed", "error": "Failed to scrape creator data"}
+        
+        if creator_data.get('error') == 'temporary':
+            return {"status": "temporary_error", "message": creator_data.get('message', 'Temporary API error')}
+        
+        # Return basic info (don't save to database)
+        basic_info = {
+            'handle': creator_data.get('handle'),
+            'platform': creator_data.get('platform'),
+            'followers_count': creator_data.get('followers_count', 0),
+            'average_views': creator_data.get('average_views', 0),
+            'engagement_rate': creator_data.get('engagement_rate', 0),
+            'is_active': creator_data.get('is_active', False),
+            'activity_status': creator_data.get('activity_status', 'unknown')
+        }
+        
+        return {"status": "success", "data": basic_info}
+        
+    except Exception as e:
+        print(f"❌ Simple test creator error: {e}")
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
